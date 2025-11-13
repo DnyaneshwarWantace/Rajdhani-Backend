@@ -21,6 +21,18 @@ const R2_PUBLIC_URL = R2_ACCOUNT_ID ? `https://pub-${R2_ACCOUNT_ID}.r2.dev` : ''
 // Initialize S3 client for R2 (only if credentials are available)
 let s3Client = null;
 if (R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY) {
+  // Create HTTPS agent with proper SSL configuration
+  const httpsAgentConfig = new httpsAgent({
+    keepAlive: true,
+    maxSockets: 50,
+    rejectUnauthorized: true,
+  });
+
+  // Create request handler with HTTPS agent
+  const requestHandler = new NodeHttpHandler({
+    httpsAgent: httpsAgentConfig,
+  });
+
   s3Client = new S3Client({
     region: 'auto',
     endpoint: R2_ENDPOINT,
@@ -29,6 +41,7 @@ if (R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY) {
       secretAccessKey: R2_SECRET_ACCESS_KEY,
     },
     forcePathStyle: true,
+    requestHandler: requestHandler,
   });
 }
 
