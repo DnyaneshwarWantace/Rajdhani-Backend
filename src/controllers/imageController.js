@@ -26,8 +26,8 @@ if (R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY) {
     keepAlive: true,
     maxSockets: 50,
     rejectUnauthorized: true,
-    // Force TLS 1.2 or higher
-    secureProtocol: 'TLSv1_2_method',
+    // Allow all TLS versions (Node.js 20 supports TLS 1.2 and 1.3)
+    // Cloudflare R2 requires TLS 1.2 or higher
   });
 
   // Create request handler with HTTPS agent
