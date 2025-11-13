@@ -10,17 +10,17 @@ const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || 'product-images';
 
-if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_S3_ACCOUNT_ID || !R2_PUBLIC_ACCOUNT_ID) {
-  console.error('❌ Missing Cloudflare R2 credentials in environment variables!');
-  console.error('Please set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_S3_ACCOUNT_ID, and R2_PUBLIC_ACCOUNT_ID in your .env file');
-}
-
 // S3 API endpoint uses different account ID for API access
 const R2_S3_ACCOUNT_ID = process.env.R2_S3_ACCOUNT_ID;
 const R2_ENDPOINT = R2_S3_ACCOUNT_ID ? `https://${R2_S3_ACCOUNT_ID}.r2.cloudflarestorage.com` : '';
 // Public URL uses the correct account ID for public access
 const R2_PUBLIC_ACCOUNT_ID = process.env.R2_PUBLIC_ACCOUNT_ID;
 const R2_PUBLIC_URL = R2_PUBLIC_ACCOUNT_ID ? `https://pub-${R2_PUBLIC_ACCOUNT_ID}.r2.dev` : '';
+
+if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_S3_ACCOUNT_ID || !R2_PUBLIC_ACCOUNT_ID) {
+  console.error('❌ Missing Cloudflare R2 credentials in environment variables!');
+  console.error('Please set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_S3_ACCOUNT_ID, and R2_PUBLIC_ACCOUNT_ID in your .env file');
+}
 
 // Initialize S3 client for R2 (only if credentials are available)
 let s3Client = null;
