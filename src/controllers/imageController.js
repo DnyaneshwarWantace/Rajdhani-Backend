@@ -27,7 +27,6 @@ if (R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY) {
       secretAccessKey: R2_SECRET_ACCESS_KEY,
     },
     forcePathStyle: true,
-    tls: true,
   });
 }
 

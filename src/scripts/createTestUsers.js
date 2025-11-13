@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const API_URL = process.env.API_URL || 'https://rajdhani.wantace.com/api';
+const API_URL = process.env.API_URL || 'http://localhost:8000/api';
 
 // Test users to create for each role
 const testUsers = [
@@ -177,7 +177,7 @@ const createTestUsers = async () => {
   } catch (error) {
     console.error('\n❌ Error:', error.message);
     console.error('\n💡 Make sure:');
-    console.error('   1. Backend server is running on https://rajdhani.wantace.com');
+    console.error('   1. Backend server is running on http://localhost:8000');
     console.error('   2. Admin user exists: admin@rajdhani.com / admin@123');
     console.error('   3. API URL is correct\n');
     process.exit(1);
