@@ -79,10 +79,17 @@ export const uploadSingle = upload.single('image');
 export const uploadImage = async (req, res) => {
   try {
     // Validate R2 credentials
-    if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
+    if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_S3_ACCOUNT_ID || !R2_PUBLIC_ACCOUNT_ID) {
+      const missing = [];
+      if (!R2_ACCOUNT_ID) missing.push('R2_ACCOUNT_ID');
+      if (!R2_ACCESS_KEY_ID) missing.push('R2_ACCESS_KEY_ID');
+      if (!R2_SECRET_ACCESS_KEY) missing.push('R2_SECRET_ACCESS_KEY');
+      if (!R2_S3_ACCOUNT_ID) missing.push('R2_S3_ACCOUNT_ID');
+      if (!R2_PUBLIC_ACCOUNT_ID) missing.push('R2_PUBLIC_ACCOUNT_ID');
+      
       return res.status(500).json({
         success: false,
-        error: 'Cloudflare R2 credentials not configured. Please set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY in environment variables.'
+        error: `Cloudflare R2 credentials not configured. Missing: ${missing.join(', ')}. Please add these to your .env file and restart the backend.`
       });
     }
 
@@ -191,10 +198,17 @@ export const deleteImage = async (req, res) => {
     const key = domainIndex >= 0 ? urlParts.slice(domainIndex + 1).join('/') : urlParts.slice(-2).join('/');
 
     // Validate R2 credentials
-    if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
+    if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_S3_ACCOUNT_ID || !R2_PUBLIC_ACCOUNT_ID) {
+      const missing = [];
+      if (!R2_ACCOUNT_ID) missing.push('R2_ACCOUNT_ID');
+      if (!R2_ACCESS_KEY_ID) missing.push('R2_ACCESS_KEY_ID');
+      if (!R2_SECRET_ACCESS_KEY) missing.push('R2_SECRET_ACCESS_KEY');
+      if (!R2_S3_ACCOUNT_ID) missing.push('R2_S3_ACCOUNT_ID');
+      if (!R2_PUBLIC_ACCOUNT_ID) missing.push('R2_PUBLIC_ACCOUNT_ID');
+      
       return res.status(500).json({
         success: false,
-        error: 'Cloudflare R2 credentials not configured. Please set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY in environment variables.'
+        error: `Cloudflare R2 credentials not configured. Missing: ${missing.join(', ')}. Please add these to your .env file and restart the backend.`
       });
     }
 
