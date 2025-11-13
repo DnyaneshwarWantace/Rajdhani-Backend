@@ -21,16 +21,20 @@ const R2_PUBLIC_URL = R2_ACCOUNT_ID ? `https://pub-${R2_ACCOUNT_ID}.r2.dev` : ''
 // Initialize S3 client for R2 (only if credentials are available)
 let s3Client = null;
 if (R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY) {
-  // Create HTTPS agent with proper SSL configuration
+  // Create HTTPS agent with SSL configuration that works with Cloudflare R2
   const httpsAgentConfig = new httpsAgent({
     keepAlive: true,
     maxSockets: 50,
     rejectUnauthorized: true,
+    // Force TLS 1.2 or higher
+    secureProtocol: 'TLSv1_2_method',
   });
 
   // Create request handler with HTTPS agent
   const requestHandler = new NodeHttpHandler({
     httpsAgent: httpsAgentConfig,
+    requestTimeout: 30000,
+    connectionTimeout: 10000,
   });
 
   s3Client = new S3Client({
