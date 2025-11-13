@@ -1,0 +1,107 @@
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import connectDB from './config/database.js';
+import rawMaterialRoutes from './routes/rawMaterialRoutes.js';
+import supplierRoutes from './routes/supplierRoutes.js';
+import purchaseOrderRoutes from './routes/purchaseOrderRoutes.js';
+import dropdownRoutes from './routes/dropdownRoutes.js';
+import productRoutes from './routes/productRoutes.js';
+import individualProductRoutes from './routes/individualProductRoutes.js';
+import recipeRoutes from './routes/recipeRoutes.js';
+import customerRoutes from './routes/customerRoutes.js';
+import orderRoutes from './routes/orderRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
+import productionRoutes from './routes/productionRoutes.js';
+import materialConsumptionRoutes from './routes/materialConsumptionRoutes.js';
+import authRoutes from './routes/authRoutes.js';
+import publicRoutes from './routes/publicRoutes.js';
+import userRoutes from './routes/userRoutes.js';
+import permissionRoutes from './routes/permissionRoutes.js';
+import roleRoutes from './routes/roleRoutes.js';
+import imageRoutes from './routes/imageRoutes.js';
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
+
+// Connect to MongoDB
+connectDB();
+
+// Routes
+// Auth routes (public)
+app.use('/api/auth', authRoutes);
+
+// Public routes for QR code scanning (no authentication required)
+app.use('/api/public', publicRoutes);
+
+// Protected routes
+app.use('/api/users', userRoutes);
+app.use('/api/permissions', permissionRoutes);
+app.use('/api/roles', roleRoutes);
+app.use('/api/raw-materials', rawMaterialRoutes);
+app.use('/api/suppliers', supplierRoutes);
+app.use('/api/purchase-orders', purchaseOrderRoutes);
+app.use('/api/dropdowns', dropdownRoutes);
+app.use('/api/products', productRoutes);
+app.use('/api/individual-products', individualProductRoutes);
+app.use('/api/recipes', recipeRoutes);
+app.use('/api/customers', customerRoutes);
+app.use('/api/orders', orderRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/production', productionRoutes);
+app.use('/api/material-consumption', materialConsumptionRoutes);
+app.use('/api/images', imageRoutes);
+
+// Cleanup routes
+import cleanupRoutes from './routes/cleanupRoutes.js';
+app.use('/api/cleanup', cleanupRoutes);
+
+// Health check route
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'Rajdhani Backend API is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// 404 handler - log the missing route for debugging
+app.use((req, res) => {
+  console.log(`404 Error: User attempted to access non-existent route:"${req.path}"`);
+  res.status(404).json({
+    success: false,
+    error: 'Route not found',
+    path: req.path
+  });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || 'Internal server error'
+  });
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📍 API URL: http://localhost:${PORT}`);
+  console.log(`🏥 Health check: http://localhost:${PORT}/health`);
+});
+
+export default app;
