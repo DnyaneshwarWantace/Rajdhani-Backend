@@ -15,7 +15,10 @@ if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
   console.error('Please set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, and R2_SECRET_ACCESS_KEY in your .env file');
 }
 
-const R2_ENDPOINT = R2_ACCOUNT_ID ? `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com` : '';
+// S3 API endpoint uses different account ID for API access
+const R2_S3_ACCOUNT_ID = process.env.R2_S3_ACCOUNT_ID || 'c81c5826ca7f6f9a1ae1c574077714d9';
+const R2_ENDPOINT = R2_S3_ACCOUNT_ID ? `https://${R2_S3_ACCOUNT_ID}.r2.cloudflarestorage.com` : '';
+// Public URL uses the display account ID
 const R2_PUBLIC_URL = R2_ACCOUNT_ID ? `https://pub-${R2_ACCOUNT_ID}.r2.dev` : '';
 
 // Initialize S3 client for R2 (only if credentials are available)
