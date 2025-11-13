@@ -18,8 +18,9 @@ if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
 // S3 API endpoint uses different account ID for API access
 const R2_S3_ACCOUNT_ID = process.env.R2_S3_ACCOUNT_ID || 'c81c5826ca7f6f9a1ae1c574077714d9';
 const R2_ENDPOINT = R2_S3_ACCOUNT_ID ? `https://${R2_S3_ACCOUNT_ID}.r2.cloudflarestorage.com` : '';
-// Public URL uses the display account ID
-const R2_PUBLIC_URL = R2_ACCOUNT_ID ? `https://pub-${R2_ACCOUNT_ID}.r2.dev` : '';
+// Public URL uses the correct account ID for public access
+const R2_PUBLIC_ACCOUNT_ID = process.env.R2_PUBLIC_ACCOUNT_ID || 'ef162617dd6143408b2a13d97dd76fc4';
+const R2_PUBLIC_URL = R2_PUBLIC_ACCOUNT_ID ? `https://pub-${R2_PUBLIC_ACCOUNT_ID}.r2.dev` : '';
 
 // Initialize S3 client for R2 (only if credentials are available)
 let s3Client = null;
