@@ -76,6 +76,12 @@ const productSchema = new mongoose.Schema({
     default: '',
     trim: true
   },
+  weight_unit: {
+    type: String,
+    default: '',
+    trim: true
+    // Validated against dropdown_options in controller
+  },
 
   // Product specifications
   color: {

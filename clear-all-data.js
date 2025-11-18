@@ -1,102 +1,124 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import Product from './src/models/Product.js';
+import IndividualProduct from './src/models/IndividualProduct.js';
+import { ProductionBatch, ProductionStep, ProductionFlow, ProductionFlowStep, MaterialConsumption } from './src/models/Production.js';
+import ProductionWaste from './src/models/ProductionWaste.js';
+import Order from './src/models/Order.js';
+import OrderItem from './src/models/OrderItem.js';
+import PurchaseOrder from './src/models/PurchaseOrder.js';
+import ProductRecipe from './src/models/ProductRecipe.js';
+import { connectDB } from './src/config/database.js';
 
 dotenv.config();
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/Rajdhani';
-
-async function clearAllData() {
+const clearAllData = async () => {
   try {
-    console.log('🔄 Connecting to MongoDB...');
-    await mongoose.connect(MONGODB_URI);
+    console.log('🗑️  Starting data cleanup...\n');
+    
+    // Connect to MongoDB
+    await connectDB();
     console.log('✅ Connected to MongoDB\n');
-
-    const db = mongoose.connection.db;
-
-    // 1. Clear all products
-    console.log('🗑️  Clearing products...');
-    const productsResult = await db.collection('products').deleteMany({});
-    console.log(`   ✅ Deleted ${productsResult.deletedCount} products`);
-
-    // 2. Clear all individual products
-    console.log('🗑️  Clearing individual products...');
-    const individualProductsResult = await db.collection('individual_products').deleteMany({});
-    console.log(`   ✅ Deleted ${individualProductsResult.deletedCount} individual products`);
-
-    // 3. Clear all product recipes
-    console.log('🗑️  Clearing product recipes...');
-    const recipesResult = await db.collection('product_recipes').deleteMany({});
-    console.log(`   ✅ Deleted ${recipesResult.deletedCount} recipes`);
-
-    // 4. Clear all recipe materials
-    console.log('🗑️  Clearing recipe materials...');
-    const recipeMaterialsResult = await db.collection('recipe_materials').deleteMany({});
-    console.log(`   ✅ Deleted ${recipeMaterialsResult.deletedCount} recipe materials`);
-
-    // 5. Clear all production batches
-    console.log('🗑️  Clearing production batches...');
-    const batchesResult = await db.collection('production_batches').deleteMany({});
-    console.log(`   ✅ Deleted ${batchesResult.deletedCount} production batches`);
-
-    // 6. Clear all production flows
-    console.log('🗑️  Clearing production flows...');
-    const flowsResult = await db.collection('production_flows').deleteMany({});
-    console.log(`   ✅ Deleted ${flowsResult.deletedCount} production flows`);
-
-    // 7. Clear all production flow steps
-    console.log('🗑️  Clearing production flow steps...');
-    const flowStepsResult = await db.collection('production_flow_steps').deleteMany({});
-    console.log(`   ✅ Deleted ${flowStepsResult.deletedCount} production flow steps`);
-
-    // 8. Clear all production steps
-    console.log('🗑️  Clearing production steps...');
-    const stepsResult = await db.collection('production_steps').deleteMany({});
-    console.log(`   ✅ Deleted ${stepsResult.deletedCount} production steps`);
-
-    // 9. Clear all material consumption
-    console.log('🗑️  Clearing material consumption...');
-    const consumptionResult = await db.collection('material_consumption').deleteMany({});
-    console.log(`   ✅ Deleted ${consumptionResult.deletedCount} material consumption records`);
-
-    // 10. Clear all production waste
-    console.log('🗑️  Clearing production waste...');
-    const wasteResult = await db.collection('production_waste').deleteMany({});
-    console.log(`   ✅ Deleted ${wasteResult.deletedCount} waste records`);
-
-    // 11. Clear all raw materials
-    console.log('🗑️  Clearing raw materials...');
-    const rawMaterialsResult = await db.collection('raw_materials').deleteMany({});
-    console.log(`   ✅ Deleted ${rawMaterialsResult.deletedCount} raw materials`);
-
-    // 12. Clear all purchase orders
-    console.log('🗑️  Clearing purchase orders...');
-    const purchaseOrdersResult = await db.collection('purchase_orders').deleteMany({});
-    console.log(`   ✅ Deleted ${purchaseOrdersResult.deletedCount} purchase orders`);
-
-    console.log('\n✅ All data cleared successfully!');
-    console.log('\n📋 Summary:');
-    console.log(`   Products: ${productsResult.deletedCount}`);
-    console.log(`   Individual Products: ${individualProductsResult.deletedCount}`);
-    console.log(`   Recipes: ${recipesResult.deletedCount}`);
-    console.log(`   Recipe Materials: ${recipeMaterialsResult.deletedCount}`);
-    console.log(`   Production Batches: ${batchesResult.deletedCount}`);
-    console.log(`   Production Flows: ${flowsResult.deletedCount}`);
-    console.log(`   Production Flow Steps: ${flowStepsResult.deletedCount}`);
-    console.log(`   Production Steps: ${stepsResult.deletedCount}`);
-    console.log(`   Material Consumption: ${consumptionResult.deletedCount}`);
-    console.log(`   Production Waste: ${wasteResult.deletedCount}`);
-    console.log(`   Raw Materials: ${rawMaterialsResult.deletedCount}`);
-    console.log(`   Purchase Orders: ${purchaseOrdersResult.deletedCount}`);
-    console.log('\n💡 Dropdown options, machines, customers, suppliers, and orders are preserved.');
-
-  } catch (error) {
-    console.error('❌ Error clearing data:', error);
-  } finally {
-    await mongoose.disconnect();
-    console.log('\n🔌 Disconnected from MongoDB');
+    
+    // Clear all data in order (respecting dependencies)
+    console.log('═'.repeat(60));
+    console.log('CLEARING ALL DATA');
+    console.log('═'.repeat(60));
+    console.log('');
+    
+    // 1. Clear Order Items (depend on Orders)
+    console.log('1️⃣  Clearing Order Items...');
+    const orderItemsDeleted = await OrderItem.deleteMany({});
+    console.log(`   ✅ Deleted ${orderItemsDeleted.deletedCount} order items\n`);
+    
+    // 2. Clear Orders
+    console.log('2️⃣  Clearing Orders...');
+    const ordersDeleted = await Order.deleteMany({});
+    console.log(`   ✅ Deleted ${ordersDeleted.deletedCount} orders\n`);
+    
+    // 3. Clear Purchase Orders
+    console.log('3️⃣  Clearing Purchase Orders...');
+    const purchaseOrdersDeleted = await PurchaseOrder.deleteMany({});
+    console.log(`   ✅ Deleted ${purchaseOrdersDeleted.deletedCount} purchase orders\n`);
+    
+    // 4. Clear Material Consumption (depend on Production)
+    console.log('4️⃣  Clearing Material Consumption...');
+    const materialConsumptionDeleted = await MaterialConsumption.deleteMany({});
+    console.log(`   ✅ Deleted ${materialConsumptionDeleted.deletedCount} material consumption records\n`);
+    
+    // 5. Clear Production Waste
+    console.log('5️⃣  Clearing Production Waste...');
+    const productionWasteDeleted = await ProductionWaste.deleteMany({});
+    console.log(`   ✅ Deleted ${productionWasteDeleted.deletedCount} production waste records\n`);
+    
+    // 6. Clear Production Flow Steps (depend on Production Flows)
+    console.log('6️⃣  Clearing Production Flow Steps...');
+    const productionFlowStepsDeleted = await ProductionFlowStep.deleteMany({});
+    console.log(`   ✅ Deleted ${productionFlowStepsDeleted.deletedCount} production flow steps\n`);
+    
+    // 7. Clear Production Steps (depend on Production Batches)
+    console.log('7️⃣  Clearing Production Steps...');
+    const productionStepsDeleted = await ProductionStep.deleteMany({});
+    console.log(`   ✅ Deleted ${productionStepsDeleted.deletedCount} production steps\n`);
+    
+    // 8. Clear Production Flows
+    console.log('8️⃣  Clearing Production Flows...');
+    const productionFlowsDeleted = await ProductionFlow.deleteMany({});
+    console.log(`   ✅ Deleted ${productionFlowsDeleted.deletedCount} production flows\n`);
+    
+    // 9. Clear Production Batches
+    console.log('9️⃣  Clearing Production Batches...');
+    const productionBatchesDeleted = await ProductionBatch.deleteMany({});
+    console.log(`   ✅ Deleted ${productionBatchesDeleted.deletedCount} production batches\n`);
+    
+    // 10. Clear Individual Products (depend on Products)
+    console.log('🔟 Clearing Individual Products...');
+    const individualProductsDeleted = await IndividualProduct.deleteMany({});
+    console.log(`   ✅ Deleted ${individualProductsDeleted.deletedCount} individual products\n`);
+    
+    // 11. Clear Product Recipes (depend on Products)
+    console.log('1️⃣1️⃣  Clearing Product Recipes...');
+    const productRecipesDeleted = await ProductRecipe.deleteMany({});
+    console.log(`   ✅ Deleted ${productRecipesDeleted.deletedCount} product recipes\n`);
+    
+    // 12. Clear Products (last, as other things depend on them)
+    console.log('1️⃣2️⃣  Clearing Products...');
+    const productsDeleted = await Product.deleteMany({});
+    console.log(`   ✅ Deleted ${productsDeleted.deletedCount} products\n`);
+    
+    console.log('═'.repeat(60));
+    console.log('📊 CLEANUP SUMMARY');
+    console.log('═'.repeat(60));
+    console.log(`   ✅ Order Items: ${orderItemsDeleted.deletedCount}`);
+    console.log(`   ✅ Orders: ${ordersDeleted.deletedCount}`);
+    console.log(`   ✅ Purchase Orders: ${purchaseOrdersDeleted.deletedCount}`);
+    console.log(`   ✅ Material Consumption: ${materialConsumptionDeleted.deletedCount}`);
+    console.log(`   ✅ Production Waste: ${productionWasteDeleted.deletedCount}`);
+    console.log(`   ✅ Production Flow Steps: ${productionFlowStepsDeleted.deletedCount}`);
+    console.log(`   ✅ Production Steps: ${productionStepsDeleted.deletedCount}`);
+    console.log(`   ✅ Production Flows: ${productionFlowsDeleted.deletedCount}`);
+    console.log(`   ✅ Production Batches: ${productionBatchesDeleted.deletedCount}`);
+    console.log(`   ✅ Individual Products: ${individualProductsDeleted.deletedCount}`);
+    console.log(`   ✅ Product Recipes: ${productRecipesDeleted.deletedCount}`);
+    console.log(`   ✅ Products: ${productsDeleted.deletedCount}`);
+    console.log('═'.repeat(60));
+    console.log('');
+    console.log('🎉 All data cleared successfully!');
+    console.log('');
+    
     process.exit(0);
+  } catch (error) {
+    console.error('\n❌ ERROR:', error.message);
+    console.error('');
+    if (error.message.includes('ECONNREFUSED') || error.message.includes('querySrv')) {
+      console.error('💡 MongoDB connection failed. Please check:');
+      console.error('   1. MongoDB is running');
+      console.error('   2. MONGODB_URI in .env is correct');
+      console.error('   3. Network connection is working');
+    }
+    process.exit(1);
   }
-}
+};
 
+// Run the cleanup
 clearAllData();
-

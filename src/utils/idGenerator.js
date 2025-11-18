@@ -26,33 +26,51 @@ const getGlobalDateString = () => {
 
 /**
  * Get next sequence number for a prefix and date
+ * Uses atomic findOneAndUpdate to prevent race conditions
  */
 const getNextSequence = async (prefix, dateStr = null) => {
   try {
     const actualDateStr = dateStr || getDateString();
     
-    // Try to find existing sequence
-    let sequence = await IdSequence.findOne({ 
-      prefix: prefix.toUpperCase(), 
-      date_str: actualDateStr 
-    });
+    // First, try to find and update existing sequence
+    let sequence = await IdSequence.findOneAndUpdate(
+      { 
+        prefix: prefix.toUpperCase(), 
+        date_str: actualDateStr 
+      },
+      { 
+        $inc: { last_sequence: 1 }
+      },
+      { 
+        new: true
+      }
+    );
 
-    if (sequence) {
-      // Increment existing sequence
-      sequence.last_sequence += 1;
-      await sequence.save();
-      return sequence.last_sequence;
-    } else {
-      // Create new sequence
-      const newSequence = new IdSequence({
-        id: await getNextIdSequenceId(),
-        prefix: prefix.toUpperCase(),
-        date_str: actualDateStr,
-        last_sequence: 1
-      });
-      await newSequence.save();
-      return 1;
+    // If sequence doesn't exist, create it
+    if (!sequence) {
+      const newId = await getNextIdSequenceId();
+      sequence = await IdSequence.findOneAndUpdate(
+        { 
+          prefix: prefix.toUpperCase(), 
+          date_str: actualDateStr 
+        },
+        { 
+          $setOnInsert: {
+            id: newId,
+            prefix: prefix.toUpperCase(),
+            date_str: actualDateStr,
+            last_sequence: 1
+          }
+        },
+        { 
+          upsert: true, 
+          new: true,
+          setDefaultsOnInsert: true
+        }
+      );
     }
+
+    return sequence.last_sequence;
   } catch (error) {
     console.error('Error getting next sequence:', error);
     throw error;

@@ -209,13 +209,51 @@ const createMaterialConsumption = async (req, res) => {
     const deductNow = req.body && Object.prototype.hasOwnProperty.call(req.body, 'deduct_now') ? Boolean(req.body.deduct_now) : true;
     if (deductNow) {
       if (material_type === 'product') {
-        await Product.findOneAndUpdate(
-          { id: material_id },
-          { 
-            $inc: { base_quantity: -quantity_used },
-            $set: { updated_at: new Date() }
+        // For products with individual products selected, deduct whole units
+        if (individual_product_ids && individual_product_ids.length > 0) {
+          // When individual products are selected, deduct the full quantity of those individual products
+          // Each individual product is a whole unit, so deduct the count of individual products
+          const quantityToDeduct = individual_product_ids.length;
+          
+          console.log(`📦 Deducting ${quantityToDeduct} whole units (${individual_product_ids.length} individual products) from product ${material_id}`);
+          console.log(`📋 Recipe required: ${quantity_used} ${unit}, but consuming ${quantityToDeduct} whole units`);
+          
+          await Product.findOneAndUpdate(
+            { id: material_id },
+            { 
+              $inc: { base_quantity: -quantityToDeduct }, // Deduct whole units, not recipe quantity
+              $set: { updated_at: new Date() }
+            }
+          );
+          
+          // Also update individual_products_count and current_stock if the product uses individual tracking
+          const product = await Product.findOne({ id: material_id });
+          if (product && product.individual_stock_tracking) {
+            const availableCount = await IndividualProduct.countDocuments({
+              product_id: material_id,
+              status: 'available'
+            });
+            await Product.findOneAndUpdate(
+              { id: material_id },
+              { 
+                $set: { 
+                  current_stock: availableCount,
+                  individual_products_count: availableCount,
+                  updated_at: new Date()
+                }
+              }
+            );
           }
-        );
+        } else {
+          // No individual products selected, deduct recipe quantity (for bulk products)
+          await Product.findOneAndUpdate(
+            { id: material_id },
+            { 
+              $inc: { base_quantity: -quantity_used },
+              $set: { updated_at: new Date() }
+            }
+          );
+        }
       } else if (material_type === 'raw_material') {
         await RawMaterial.findOneAndUpdate(
           { id: material_id },
@@ -228,17 +266,58 @@ const createMaterialConsumption = async (req, res) => {
     }
 
     // Update individual product status if individual products are specified
+    // IMPORTANT: Only mark as consumed if deduct_now is true (actual consumption, not just planning)
+    // IMPORTANT: Ensure individual_product_ids are always saved in the consumption record
     if (individual_product_ids && individual_product_ids.length > 0) {
-      await IndividualProduct.updateMany(
-        { id: { $in: individual_product_ids } },
-        { 
-          $set: { 
-            status: 'consumed',
-            consumed_at: new Date(),
-            updated_at: new Date()
+      // Ensure the consumption record has these IDs saved
+      if (!consumption.individual_product_ids || consumption.individual_product_ids.length === 0) {
+        consumption.individual_product_ids = individual_product_ids;
+        await consumption.save();
+        console.log(`✅ Saved individual product IDs to consumption record: ${individual_product_ids.join(', ')}`);
+      }
+      
+      // Only mark individual products as consumed if deduct_now is true (actual consumption)
+      if (deductNow) {
+        await IndividualProduct.updateMany(
+          { id: { $in: individual_product_ids } },
+          { 
+            $set: { 
+              status: 'consumed',
+              consumed_at: new Date(),
+              updated_at: new Date()
+            }
           }
+        );
+        console.log(`✅ Marked ${individual_product_ids.length} individual products as consumed (deduct_now=true)`);
+      } else {
+        console.log(`ℹ️ Individual product IDs saved but NOT marked as consumed yet (deduct_now=false - planning phase)`);
+      }
+    } else if (material_type === 'product') {
+      // Fallback: If no individual_product_ids were provided but this is a product with individual tracking,
+      // try to find consumed individual products that match this consumption record
+      const product = await Product.findOne({ id: material_id });
+      if (product && product.individual_stock_tracking) {
+        // Look for individual products that were consumed around the same time
+        const consumedDate = new Date(consumption.consumed_at);
+        const startDate = new Date(consumedDate.getTime() - 24 * 60 * 60 * 1000); // 1 day before
+        const endDate = new Date(consumedDate.getTime() + 24 * 60 * 60 * 1000); // 1 day after
+        
+        const consumedProducts = await IndividualProduct.find({
+          product_id: material_id,
+          status: 'consumed',
+          consumed_at: {
+            $gte: startDate,
+            $lte: endDate
+          }
+        }).limit(quantity_used || 10);
+        
+        if (consumedProducts.length > 0) {
+          const foundIds = consumedProducts.map(ip => ip.id);
+          consumption.individual_product_ids = foundIds;
+          await consumption.save();
+          console.log(`✅ Auto-found and saved ${foundIds.length} individual product IDs: ${foundIds.join(', ')}`);
         }
-      );
+      }
     }
 
     res.status(201).json({
@@ -267,6 +346,16 @@ const updateMaterialConsumption = async (req, res) => {
     delete updateData.created_at;
     updateData.updated_at = new Date();
 
+    // Get the existing consumption record to check if we need to mark individual products as consumed
+    const existingConsumption = await MaterialConsumption.findOne({ id, status: 'active' });
+    
+    if (!existingConsumption) {
+      return res.status(404).json({
+        success: false,
+        error: 'Material consumption record not found'
+      });
+    }
+
     const consumption = await MaterialConsumption.findOneAndUpdate(
       { id, status: 'active' },
       updateData,
@@ -278,6 +367,56 @@ const updateMaterialConsumption = async (req, res) => {
         success: false,
         error: 'Material consumption record not found'
       });
+    }
+
+    // IMPORTANT: If this is a product with individual_product_ids and they haven't been consumed yet,
+    // mark them as consumed now (this happens when wastage is completed)
+    // Check if individual products need to be marked as consumed
+    if (consumption.material_type === 'product' && 
+        consumption.individual_product_ids && 
+        consumption.individual_product_ids.length > 0) {
+      
+      // Check if any of these individual products are still available (not consumed)
+      const individualProducts = await IndividualProduct.find({
+        id: { $in: consumption.individual_product_ids }
+      });
+      
+      const availableProducts = individualProducts.filter(ip => ip.status === 'available');
+      
+      if (availableProducts.length > 0) {
+        // Mark these individual products as consumed (wastage step completed)
+        await IndividualProduct.updateMany(
+          { id: { $in: availableProducts.map(ip => ip.id) } },
+          { 
+            $set: { 
+              status: 'consumed',
+              consumed_at: new Date(),
+              updated_at: new Date()
+            }
+          }
+        );
+        
+        console.log(`✅ Marked ${availableProducts.length} individual products as consumed (wastage step completed)`);
+        
+        // Also update product stock counts
+        const product = await Product.findOne({ id: consumption.material_id });
+        if (product && product.individual_stock_tracking) {
+          const availableCount = await IndividualProduct.countDocuments({
+            product_id: consumption.material_id,
+            status: 'available'
+          });
+          await Product.findOneAndUpdate(
+            { id: consumption.material_id },
+            { 
+              $set: { 
+                current_stock: availableCount,
+                individual_products_count: availableCount,
+                updated_at: new Date()
+              }
+            }
+          );
+        }
+      }
     }
 
     res.json({

@@ -41,7 +41,7 @@ app.use((req, res, next) => {
 connectDB();
 
 // Routes
-// Auth routes (public)
+// Auth routes (public) // nwe thins  added 
 app.use('/api/auth', authRoutes);
 
 // Public routes for QR code scanning (no authentication required)

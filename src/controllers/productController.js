@@ -356,11 +356,13 @@ export const deleteProduct = async (req, res) => {
 // Get product statistics
 export const getProductStats = async (req, res) => {
   try {
+    // Use countDocuments for accurate count (more efficient than find().length)
+    const totalProductsCount = await Product.countDocuments({});
     const products = await Product.find({});
     const individualProducts = await IndividualProduct.find({});
 
     const stats = {
-      total_products: products.length,
+      total_products: totalProductsCount,
       active_products: products.filter(p => p.status === 'active').length,
       inactive_products: products.filter(p => p.status === 'inactive').length,
       discontinued_products: products.filter(p => p.status === 'discontinued').length,
@@ -376,10 +378,12 @@ export const getProductStats = async (req, res) => {
           const availableCount = individualProducts.filter(ip => 
             ip.product_id === p.id && ip.status === 'available'
           ).length;
-          return availableCount <= p.reorder_point;
+          // Low stock: above 0 but at or below reorder point (exclude out of stock)
+          return availableCount > 0 && availableCount <= p.reorder_point;
         } else {
           // For bulk products, check current stock
-          return p.current_stock <= p.reorder_point;
+          // Low stock: above 0 but at or below reorder point (exclude out of stock)
+          return p.current_stock > 0 && p.current_stock <= p.reorder_point;
         }
       }).length,
       out_of_stock_products: products.filter(p => {

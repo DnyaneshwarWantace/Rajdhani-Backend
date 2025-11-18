@@ -40,6 +40,13 @@ const materialConsumptionSchema = new mongoose.Schema({
     required: true,
     min: 0
   },
+  // For products: actual consumed quantity (fractional, e.g., 0.4)
+  // quantity_used represents whole products (e.g., 1), actual_consumed_quantity represents actual usage (e.g., 0.4)
+  actual_consumed_quantity: {
+    type: Number,
+    required: false,
+    min: 0
+  },
   unit: {
     type: String,
     required: true
