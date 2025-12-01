@@ -58,7 +58,7 @@ const storage = multer.memoryStorage();
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
+    fileSize: 20 * 1024 * 1024, // 20MB limit (increased for high-res product images)
   },
   fileFilter: (req, file, cb) => {
     // Accept only image files
@@ -110,11 +110,11 @@ export const uploadImage = async (req, res) => {
       });
     }
 
-    // Validate file size (max 5MB)
-    if (req.file.size > 5 * 1024 * 1024) {
+    // Validate file size (max 20MB - increased for high-res product images)
+    if (req.file.size > 20 * 1024 * 1024) {
       return res.status(400).json({
         success: false,
-        error: 'Image size must be less than 5MB'
+        error: 'Image size must be less than 20MB'
       });
     }
 

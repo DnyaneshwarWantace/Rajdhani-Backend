@@ -419,8 +419,13 @@ export const getIndividualProductStats = async (req, res) => {
   try {
     const { product_id } = req.params;
 
+    // If product_id is provided, get stats for that specific product
+    // Otherwise, get overall stats for all individual products
+    const matchStage = product_id ? { $match: { product_id } } : { $match: {} };
+    const countQuery = product_id ? { product_id } : {};
+
     const stats = await IndividualProduct.aggregate([
-      { $match: { product_id } },
+      matchStage,
       {
         $group: {
           _id: '$status',
@@ -429,18 +434,18 @@ export const getIndividualProductStats = async (req, res) => {
       }
     ]);
 
-    const totalCount = await IndividualProduct.countDocuments({ product_id });
-    const availableCount = await IndividualProduct.countDocuments({ 
-      product_id, 
-      status: 'available' 
+    const totalCount = await IndividualProduct.countDocuments(countQuery);
+    const availableCount = await IndividualProduct.countDocuments({
+      ...countQuery,
+      status: 'available'
     });
-    const soldCount = await IndividualProduct.countDocuments({ 
-      product_id, 
-      status: 'sold' 
+    const soldCount = await IndividualProduct.countDocuments({
+      ...countQuery,
+      status: 'sold'
     });
-    const damagedCount = await IndividualProduct.countDocuments({ 
-      product_id, 
-      status: 'damaged' 
+    const damagedCount = await IndividualProduct.countDocuments({
+      ...countQuery,
+      status: 'damaged'
     });
 
     const statusBreakdown = stats.reduce((acc, stat) => {

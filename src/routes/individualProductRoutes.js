@@ -26,7 +26,8 @@ router.use(checkPageAccess('products'));
 router.post('/bulk', checkPermission('individual_product_create'), createIndividualProducts);
 router.get('/', checkPermission('individual_product_view'), getAllIndividualProducts);
 router.get('/product/:product_id', checkPermission('individual_product_view'), getIndividualProductsByProduct);
-router.get('/stats/:product_id', checkPermission('individual_product_view'), getIndividualProductStats);
+router.get('/stats', checkPermission('individual_product_view'), getIndividualProductStats); // Overall stats
+router.get('/stats/:product_id', checkPermission('individual_product_view'), getIndividualProductStats); // Product-specific stats
 router.get('/:id', checkPermission('individual_product_view'), getIndividualProductById);
 router.get('/qr/:qr_code', checkPermission('individual_product_view'), getIndividualProductByQR); // QR access might need to be public, but for now require auth
 router.put('/:id', checkPermission('individual_product_edit'), updateIndividualProduct);

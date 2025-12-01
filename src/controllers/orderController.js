@@ -50,6 +50,24 @@ export const createOrder = async (req, res) => {
     // Create order items if provided
     if (orderData.items && orderData.items.length > 0) {
       for (const itemData of orderData.items) {
+        console.log('========== ITEM DATA RECEIVED FROM FRONTEND ==========');
+        console.log('Product:', itemData.product_name);
+        console.log('Quantity:', itemData.quantity);
+        console.log('unit_price from frontend:', itemData.unit_price);
+        console.log('total_price from frontend:', itemData.total_price);
+        console.log('pricing_unit from frontend:', itemData.pricing_unit);
+        console.log('unit_value from frontend:', itemData.unit_value);
+        console.log('product_dimensions from frontend:', itemData.product_dimensions);
+        console.log('======================================================');
+
+        // Use the total_price from frontend if provided (already calculated with SQM logic)
+        // Otherwise fall back to quantity * unit_price
+        const totalPrice = itemData.total_price !== undefined
+          ? itemData.total_price
+          : (itemData.quantity * itemData.unit_price);
+
+        console.log('FINAL totalPrice to save:', totalPrice);
+
         const orderItem = new OrderItem({
           id: await generateOrderItemId(),
           order_id: order.id,
@@ -59,10 +77,14 @@ export const createOrder = async (req, res) => {
           product_type: itemData.product_type || 'product',
           quantity: itemData.quantity,
           unit_price: itemData.unit_price.toString(),
-          total_price: (itemData.quantity * itemData.unit_price).toString(),
+          total_price: totalPrice.toString(),
           quality_grade: itemData.quality_grade || 'A',
           specifications: itemData.specifications || null,
-          selected_individual_products: itemData.selected_individual_products || []
+          selected_individual_products: itemData.selected_individual_products || [],
+          // Store additional pricing info if provided
+          pricing_unit: itemData.pricing_unit || null,
+          unit_value: itemData.unit_value || null,
+          product_dimensions: itemData.product_dimensions || null
         });
         await orderItem.save();
       }
@@ -471,21 +493,58 @@ const updateOrderTotals = async (orderId) => {
 // Get order statistics
 export const getOrderStats = async (req, res) => {
   try {
-    const orders = await Order.find({});
+    // Use MongoDB aggregation for much faster stats calculation
+    const statsAggregation = await Order.aggregate([
+      {
+        $facet: {
+          statusCounts: [
+            {
+              $group: {
+                _id: '$status',
+                count: { $sum: 1 }
+              }
+            }
+          ],
+          financials: [
+            {
+              $group: {
+                _id: null,
+                total_order_value: { $sum: { $toDouble: '$total_amount' } },
+                total_paid_amount: { $sum: { $toDouble: '$paid_amount' } },
+                total_outstanding: { $sum: { $toDouble: '$outstanding_amount' } },
+                total_orders: { $sum: 1 }
+              }
+            }
+          ]
+        }
+      }
+    ]);
+
+    const statusCounts = {};
+    statsAggregation[0].statusCounts.forEach(s => {
+      statusCounts[s._id] = s.count;
+    });
+
+    const financials = statsAggregation[0].financials[0] || {
+      total_order_value: 0,
+      total_paid_amount: 0,
+      total_outstanding: 0,
+      total_orders: 0
+    };
 
     const stats = {
-      total_orders: orders.length,
-      pending_orders: orders.filter(o => o.status === 'pending').length,
-      accepted_orders: orders.filter(o => o.status === 'accepted').length,
-      in_production_orders: orders.filter(o => o.status === 'in_production').length,
-      ready_orders: orders.filter(o => o.status === 'ready').length,
-      dispatched_orders: orders.filter(o => o.status === 'dispatched').length,
-      delivered_orders: orders.filter(o => o.status === 'delivered').length,
-      cancelled_orders: orders.filter(o => o.status === 'cancelled').length,
-      total_order_value: orders.reduce((sum, o) => sum + parseFloat(o.total_amount) || 0, 0),
-      total_paid_amount: orders.reduce((sum, o) => sum + parseFloat(o.paid_amount) || 0, 0),
-      total_outstanding: orders.reduce((sum, o) => sum + parseFloat(o.outstanding_amount) || 0, 0),
-      average_order_value: orders.length > 0 ? orders.reduce((sum, o) => sum + parseFloat(o.total_amount) || 0, 0) / orders.length : 0
+      total_orders: financials.total_orders,
+      pending_orders: statusCounts.pending || 0,
+      accepted_orders: statusCounts.accepted || 0,
+      in_production_orders: statusCounts.in_production || 0,
+      ready_orders: statusCounts.ready || 0,
+      dispatched_orders: statusCounts.dispatched || 0,
+      delivered_orders: statusCounts.delivered || 0,
+      cancelled_orders: statusCounts.cancelled || 0,
+      total_order_value: financials.total_order_value || 0,
+      total_paid_amount: financials.total_paid_amount || 0,
+      total_outstanding: financials.total_outstanding || 0,
+      average_order_value: financials.total_orders > 0 ? (financials.total_order_value / financials.total_orders) : 0
     };
 
     res.json({

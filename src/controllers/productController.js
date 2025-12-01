@@ -356,48 +356,120 @@ export const deleteProduct = async (req, res) => {
 // Get product statistics
 export const getProductStats = async (req, res) => {
   try {
-    // Use countDocuments for accurate count (more efficient than find().length)
-    const totalProductsCount = await Product.countDocuments({});
-    const products = await Product.find({});
-    const individualProducts = await IndividualProduct.find({});
+    // Use MongoDB aggregation for much faster stats calculation
+    const [productStatusStats, individualProductStats, stockValueStats] = await Promise.all([
+      // Get product counts by status and tracking type
+      Product.aggregate([
+        {
+          $facet: {
+            statusCounts: [
+              {
+                $group: {
+                  _id: '$status',
+                  count: { $sum: 1 }
+                }
+              }
+            ],
+            trackingCounts: [
+              {
+                $group: {
+                  _id: '$individual_stock_tracking',
+                  count: { $sum: 1 }
+                }
+              }
+            ],
+            stockValue: [
+              {
+                $group: {
+                  _id: null,
+                  total: {
+                    $sum: {
+                      $multiply: [
+                        { $ifNull: ['$current_stock', 0] },
+                        { $ifNull: ['$selling_price', 0] }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]),
+      // Get individual product stats
+      IndividualProduct.aggregate([
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 }
+          }
+        }
+      ]),
+      // Get low stock and out of stock counts
+      Product.aggregate([
+        {
+          $facet: {
+            lowStock: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $gt: ['$current_stock', 0] },
+                      { $lte: ['$current_stock', '$reorder_point'] }
+                    ]
+                  }
+                }
+              },
+              { $count: 'count' }
+            ],
+            outOfStock: [
+              {
+                $match: {
+                  current_stock: 0
+                }
+              },
+              { $count: 'count' }
+            ]
+          }
+        }
+      ])
+    ]);
+
+    // Parse aggregation results
+    const statusCounts = {};
+    productStatusStats[0].statusCounts.forEach(s => {
+      statusCounts[s._id] = s.count;
+    });
+
+    const trackingCounts = {};
+    productStatusStats[0].trackingCounts.forEach(t => {
+      trackingCounts[t._id] = t.count;
+    });
+
+    const individualCounts = {};
+    individualProductStats.forEach(ip => {
+      individualCounts[ip._id] = ip.count;
+    });
+
+    const totalStockValue = productStatusStats[0].stockValue[0]?.total || 0;
+    const lowStockCount = stockValueStats[0].lowStock[0]?.count || 0;
+    const outOfStockCount = stockValueStats[0].outOfStock[0]?.count || 0;
+
+    const totalProducts = Object.values(statusCounts).reduce((sum, count) => sum + count, 0);
 
     const stats = {
-      total_products: totalProductsCount,
-      active_products: products.filter(p => p.status === 'active').length,
-      inactive_products: products.filter(p => p.status === 'inactive').length,
-      discontinued_products: products.filter(p => p.status === 'discontinued').length,
-      individual_tracking_products: products.filter(p => p.individual_stock_tracking).length,
-      total_individual_products: individualProducts.length,
-      available_individual_products: individualProducts.filter(ip => ip.status === 'available').length,
-      sold_individual_products: individualProducts.filter(ip => ip.status === 'sold').length,
-      damaged_individual_products: individualProducts.filter(ip => ip.status === 'damaged').length,
-      total_stock_value: products.reduce((sum, p) => sum + (p.current_stock * p.selling_price), 0),
-      low_stock_products: products.filter(p => {
-        if (p.individual_stock_tracking) {
-          // For individual tracking products, check available individual products
-          const availableCount = individualProducts.filter(ip => 
-            ip.product_id === p.id && ip.status === 'available'
-          ).length;
-          // Low stock: above 0 but at or below reorder point (exclude out of stock)
-          return availableCount > 0 && availableCount <= p.reorder_point;
-        } else {
-          // For bulk products, check current stock
-          // Low stock: above 0 but at or below reorder point (exclude out of stock)
-          return p.current_stock > 0 && p.current_stock <= p.reorder_point;
-        }
-      }).length,
-      out_of_stock_products: products.filter(p => {
-        if (p.individual_stock_tracking) {
-          // For individual tracking products, check if no available individual products
-          const availableCount = individualProducts.filter(ip => 
-            ip.product_id === p.id && ip.status === 'available'
-          ).length;
-          return availableCount === 0;
-        } else {
-          // For bulk products, check if current stock is 0
-          return p.current_stock === 0;
-        }
-      }).length
+      total_products: totalProducts,
+      active_products: statusCounts.active || 0,
+      inactive_products: statusCounts.inactive || 0,
+      discontinued_products: statusCounts.discontinued || 0,
+      individual_tracking_products: trackingCounts.true || 0,
+      total_individual_products: Object.values(individualCounts).reduce((sum, count) => sum + count, 0),
+      available_individual_products: individualCounts.available || 0,
+      sold_individual_products: individualCounts.sold || 0,
+      damaged_individual_products: individualCounts.damaged || 0,
+      total_stock_value: totalStockValue,
+      low_stock_products: lowStockCount,
+      out_of_stock_products: outOfStockCount
     };
 
     res.json({

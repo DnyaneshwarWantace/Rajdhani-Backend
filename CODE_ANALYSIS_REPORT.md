@@ -267,13 +267,13 @@ Your MongoDB backend is **completely ready** for production use with:
 npm run dev
 
 # Test the API
-curl http://localhost:5000/health
+curl https://rajdhani.wantace.com/health
 
 # Get dropdown data for frontend
-curl http://localhost:5000/api/raw-materials/dropdown-data
+curl https://rajdhani.wantace.com/api/raw-materials/dropdown-data
 
 # Create a raw material
-curl -X POST http://localhost:5000/api/raw-materials \
+curl -X POST https://rajdhani.wantace.com/api/raw-materials \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Cotton Fabric",

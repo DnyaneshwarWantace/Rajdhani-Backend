@@ -52,11 +52,27 @@ const orderItemSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+
+  // Additional pricing fields for SQM-based calculations
+  pricing_unit: {
+    type: String,
+    enum: ['piece', 'sqm', 'meter', 'kg', null],
+    default: null
+  },
+  unit_value: {
+    type: Number, // The calculated unit value (e.g., SQM per piece)
+    default: null
+  },
+  product_dimensions: {
+    type: mongoose.Schema.Types.Mixed, // Store product dimensions for reference
+    default: null
+  },
+
   quality_grade: {
     type: String,
     trim: true
   },
-  
+
   specifications: {
     type: String,
     trim: true
@@ -167,10 +183,36 @@ orderItemSchema.virtual('is_fully_selected').get(function() {
 orderItemSchema.set('toJSON', { virtuals: true });
 orderItemSchema.set('toObject', { virtuals: true });
 
-// Pre-save middleware to calculate total price
+// Pre-save middleware - DO NOT recalculate if total_price is already set
 orderItemSchema.pre('save', function(next) {
-  const unitPrice = parseFloat(this.unit_price) || 0;
-  this.total_price = (this.quantity * unitPrice).toFixed(2);
+  console.log('PRE-SAVE HOOK - Before:', {
+    product: this.product_name,
+    quantity: this.quantity,
+    unit_price: this.unit_price,
+    total_price_before: this.total_price,
+    pricing_unit: this.pricing_unit,
+    unit_value: this.unit_value
+  });
+
+  // IMPORTANT: Only auto-calculate if total_price is missing, empty, or zero
+  // If frontend sends a total_price, we MUST use it (for SQM-based pricing)
+  const totalPriceValue = parseFloat(this.total_price);
+  const shouldCalculate = !this.total_price ||
+                          this.total_price === '' ||
+                          this.total_price === '0' ||
+                          isNaN(totalPriceValue) ||
+                          totalPriceValue === 0;
+
+  console.log('Should calculate?', shouldCalculate, 'totalPriceValue:', totalPriceValue);
+
+  if (shouldCalculate) {
+    const unitPrice = parseFloat(this.unit_price) || 0;
+    this.total_price = (this.quantity * unitPrice).toFixed(2);
+    console.log('CALCULATED total_price:', this.total_price);
+  } else {
+    console.log('KEEPING total_price:', this.total_price);
+  }
+
   this.updated_at = new Date();
   next();
 });

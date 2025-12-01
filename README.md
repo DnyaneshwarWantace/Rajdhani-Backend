@@ -128,7 +128,7 @@ Supplier (1) ──→ (N) RawMaterial
 
 1. **Add to frontend `.env`**:
    ```
-   VITE_API_URL=http://localhost:5000/api
+   VITE_API_URL=https://rajdhani.wantace.com/api
    ```
 
 2. **Use new services**:
@@ -142,22 +142,22 @@ Supplier (1) ──→ (N) RawMaterial
 
 ```bash
 # Create supplier
-curl -X POST http://localhost:5000/api/suppliers \
+curl -X POST https://rajdhani.wantace.com/api/suppliers \
   -H "Content-Type: application/json" \
   -d '{"id":"SUP001","name":"ABC Textiles","phone":"1234567890"}'
 
 # Create raw material
-curl -X POST http://localhost:5000/api/raw-materials \
+curl -X POST https://rajdhani.wantace.com/api/raw-materials \
   -H "Content-Type: application/json" \
   -d '{"id":"RM001","name":"Cotton","category":"Fabric","current_stock":100,"unit":"kg","min_threshold":20,"max_capacity":500,"reorder_point":30,"supplier_id":"SUP001","supplier_name":"ABC Textiles","cost_per_unit":50}'
 
 # Create purchase order
-curl -X POST http://localhost:5000/api/purchase-orders \
+curl -X POST https://rajdhani.wantace.com/api/purchase-orders \
   -H "Content-Type: application/json" \
   -d '{"id":"PO001","order_number":"PO-001","supplier_id":"SUP001","supplier_name":"ABC Textiles","order_date":"2025-10-23","total_amount":5000,"status":"pending","material_details":{"materialName":"Cotton","quantity":100,"unit":"kg","costPerUnit":50}}'
 
 # Update order to delivered
-curl -X PUT http://localhost:5000/api/purchase-orders/PO001 \
+curl -X PUT https://rajdhani.wantace.com/api/purchase-orders/PO001 \
   -H "Content-Type: application/json" \
   -d '{"status":"delivered"}'
 ```
