@@ -173,11 +173,77 @@ export const getProducts = async (req, res) => {
 
     const count = await Product.countDocuments(query);
 
-    res.json({
-      success: true,
-      data: products,
-      count
-    });
+    // Get individual product counts for products with individual_stock_tracking
+    const productsWithIndividualTracking = products.filter(p => p.individual_stock_tracking);
+    
+    if (productsWithIndividualTracking.length > 0) {
+      const productIds = productsWithIndividualTracking.map(p => p.id);
+      
+      // Aggregate individual product counts by status for all products in one query
+      const individualProductStats = await IndividualProduct.aggregate([
+        {
+          $match: {
+            product_id: { $in: productIds }
+          }
+        },
+        {
+          $group: {
+            _id: {
+              product_id: '$product_id',
+              status: '$status'
+            },
+            count: { $sum: 1 }
+          }
+        }
+      ]);
+
+      // Create a map of product_id -> status counts
+      const statsMap = new Map();
+      individualProductStats.forEach(stat => {
+        const productId = stat._id.product_id;
+        if (!statsMap.has(productId)) {
+          statsMap.set(productId, {
+            available: 0,
+            sold: 0,
+            damaged: 0,
+            returned: 0,
+            in_production: 0,
+            quality_check: 0,
+            reserved: 0,
+            total: 0
+          });
+        }
+        const counts = statsMap.get(productId);
+        const status = stat._id.status;
+        counts[status] = stat.count;
+        counts.total += stat.count;
+      });
+
+      // Attach individual product stats to products
+      const productsWithStats = products.map(product => {
+        if (product.individual_stock_tracking && statsMap.has(product.id)) {
+          const stats = statsMap.get(product.id);
+          return {
+            ...product.toObject(),
+            individual_product_stats: stats
+          };
+        }
+        return product.toObject();
+      });
+
+      res.json({
+        success: true,
+        data: productsWithStats,
+        count
+      });
+    } else {
+      // No products with individual tracking, return as is
+      res.json({
+        success: true,
+        data: products.map(p => p.toObject()),
+        count
+      });
+    }
   } catch (error) {
     console.error('Error fetching products:', error);
     res.status(500).json({
