@@ -32,10 +32,18 @@ const app = express();
 const httpServer = createServer(app);
 const PORT = process.env.PORT || 5000;
 
+// CORS configuration from environment variables
+// FRONTEND_URLS should be comma-separated list: "https://rajdhani.wantace.com,http://localhost:3000"
+const FRONTEND_URLS = process.env.FRONTEND_URLS 
+  ? process.env.FRONTEND_URLS.split(',').map(url => url.trim())
+  : ['https://rajdhani.wantace.com', 'http://localhost:3000'];
+
+console.log('🌐 CORS Allowed Origins:', FRONTEND_URLS);
+
 // Initialize Socket.IO
 const io = new Server(httpServer, {
   cors: {
-    origin: ['http://localhost:8080', 'http://localhost:3000', 'https://rajdhani.wantace.com'],
+    origin: FRONTEND_URLS,
     methods: ['GET', 'POST'],
     credentials: true
   }
@@ -43,7 +51,7 @@ const io = new Server(httpServer, {
 
 // Middleware - CORS for both old and new frontend
 app.use(cors({
-  origin: ['http://localhost:8080', 'http://localhost:3000', 'https://rajdhani.wantace.com'],
+  origin: FRONTEND_URLS,
   credentials: true
 }));
 app.use(express.json());
