@@ -41,12 +41,16 @@ const FRONTEND_URLS = process.env.FRONTEND_URLS
 console.log('🌐 CORS Allowed Origins:', FRONTEND_URLS);
 
 // Initialize Socket.IO
+// When behind a proxy (like Nginx), Socket.IO needs path configuration
 const io = new Server(httpServer, {
+  path: '/socket.io/',
   cors: {
     origin: FRONTEND_URLS,
     methods: ['GET', 'POST'],
     credentials: true
-  }
+  },
+  transports: ['websocket', 'polling'],
+  allowEIO3: true
 });
 
 // Middleware - CORS for both old and new frontend
