@@ -2,6 +2,7 @@ import Product from '../models/Product.js';
 import IndividualProduct from '../models/IndividualProduct.js';
 import DropdownOption from '../models/DropdownOption.js';
 import { generateProductId, generateQRCode } from '../utils/idGenerator.js';
+import { logProductCreate, logProductUpdate, logProductDelete } from '../utils/detailedLogger.js';
 
 // Create a new product
 export const createProduct = async (req, res) => {
@@ -117,6 +118,9 @@ export const createProduct = async (req, res) => {
     const product = new Product(productData);
     await product.save();
 
+    // Log product creation with detailed info
+    await logProductCreate(req, product);
+
     res.status(201).json({
       success: true,
       data: product
@@ -167,7 +171,7 @@ export const getProducts = async (req, res) => {
     }
 
     const products = await Product.find(query)
-      .sort({ createdAt: -1 })
+      .sort({ created_at: -1 })
       .limit(parseInt(limit))
       .skip(parseInt(offset));
 
@@ -300,6 +304,17 @@ export const updateProduct = async (req, res) => {
       });
     }
 
+    // Track changes for logging
+    const changes = {};
+    Object.keys(updateData).forEach(key => {
+      if (product[key] !== updateData[key]) {
+        changes[key] = {
+          old: product[key],
+          new: updateData[key]
+        };
+      }
+    });
+
     // Validate dropdown values if they're being updated
     if (updateData.category || updateData.subcategory || updateData.unit || updateData.color || updateData.pattern) {
       const validCategories = await DropdownOption.find({ 
@@ -368,6 +383,11 @@ export const updateProduct = async (req, res) => {
     Object.assign(product, updateData);
     await product.save();
 
+    // Log product update with changes
+    if (Object.keys(changes).length > 0) {
+      await logProductUpdate(req, product, changes);
+    }
+
     res.json({
       success: true,
       data: product
@@ -405,6 +425,9 @@ export const deleteProduct = async (req, res) => {
     }
 
     await Product.findOneAndDelete({ id: req.params.id });
+
+    // Log product deletion
+    await logProductDelete(req, product);
 
     res.json({
       success: true,

@@ -162,8 +162,11 @@ const resetPermissions = async (req, res) => {
 // Get available roles (now from database)
 const getAvailableRoles = async (req, res) => {
   try {
-    // Fetch active roles from database
-    const roles = await Role.find({ is_active: true }).sort({ label: 1 });
+    // Only return admin and user roles
+    const roles = await Role.find({ 
+      is_active: true,
+      name: { $in: ['admin', 'user'] }
+    }).sort({ label: 1 });
     
     // Format for frontend
     const formattedRoles = roles.map(role => ({

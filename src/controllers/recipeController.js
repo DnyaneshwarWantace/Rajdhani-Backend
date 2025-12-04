@@ -3,6 +3,14 @@ import RecipeMaterial from '../models/RecipeMaterial.js';
 import Product from '../models/Product.js';
 import RawMaterial from '../models/RawMaterial.js';
 import { generateRecipeId, generateRecipeMaterialId } from '../utils/idGenerator.js';
+import { 
+  logProductRecipeCreate, 
+  logProductRecipeUpdate,
+  logRecipeCreate,
+  logRecipeDelete,
+  logRecipeMaterialAdd,
+  logRecipeMaterialRemove
+} from '../utils/detailedLogger.js';
 
 // SQM calculation is now handled by Product model virtual field
 
@@ -92,6 +100,9 @@ export const createProductRecipe = async (req, res) => {
     // Update product to indicate it has a recipe
     product.has_recipe = true;
     await product.save();
+
+    // Log recipe creation
+    await logRecipeCreate(req, product, recipe, materials.length);
 
     res.status(201).json({
       success: true,
@@ -241,8 +252,20 @@ export const updateRecipe = async (req, res) => {
       });
     }
 
+    // Get product for logging
+    const product = await Product.findOne({ id: recipe.product_id });
+    
+    // Get current materials count
+    const currentMaterials = await RecipeMaterial.find({ recipe_id: recipe.id });
+    const materialCount = currentMaterials.length;
+
     Object.assign(recipe, updateData);
     await recipe.save();
+
+    // Log recipe update
+    if (product) {
+      await logProductRecipeUpdate(req, product, recipe, materialCount);
+    }
 
     res.json({
       success: true,
@@ -308,6 +331,18 @@ export const addMaterialToRecipe = async (req, res) => {
     recipe.total_cost_per_sqm += recipeMaterial.total_cost_per_sqm;
     await recipe.save();
 
+    // Get product for logging
+    const product = await Product.findOne({ id: recipe.product_id });
+    if (product) {
+      await logRecipeMaterialAdd(req, product, recipe, {
+        material_id: materialData.material_id,
+        material_name: materialData.material_name,
+        material_type: materialData.material_type,
+        quantity_per_sqm: materialData.quantity_per_sqm,
+        unit: materialData.unit
+      });
+    }
+
     res.status(201).json({
       success: true,
       data: recipeMaterial
@@ -343,6 +378,16 @@ export const removeMaterialFromRecipe = async (req, res) => {
     if (recipe) {
       recipe.total_cost_per_sqm -= recipeMaterial.total_cost_per_sqm;
       await recipe.save();
+
+      // Get product for logging
+      const product = await Product.findOne({ id: recipe.product_id });
+      if (product) {
+        await logRecipeMaterialRemove(req, product, recipe, {
+          material_id: recipeMaterial.material_id,
+          material_name: recipeMaterial.material_name,
+          material_type: recipeMaterial.material_type
+        });
+      }
     }
 
     res.json({
@@ -380,6 +425,9 @@ export const deleteRecipe = async (req, res) => {
     if (product) {
       product.has_recipe = false;
       await product.save();
+
+      // Log recipe deletion
+      await logRecipeDelete(req, product, recipe);
     }
 
     res.json({

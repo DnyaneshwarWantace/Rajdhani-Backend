@@ -1,6 +1,7 @@
 import IndividualProduct from '../models/IndividualProduct.js';
 import Product from '../models/Product.js';
 import { generateIndividualProductId, generateQRCode } from '../utils/idGenerator.js';
+import { logIndividualProductGenerate } from '../utils/detailedLogger.js';
 
 // Create individual products in bulk
 export const createIndividualProducts = async (req, res) => {
@@ -81,6 +82,9 @@ export const createIndividualProducts = async (req, res) => {
     
     await product.save();
 
+    // Log individual product generation
+    await logIndividualProductGenerate(req, product, quantity);
+
     res.status(201).json({
       success: true,
       data: {
@@ -137,7 +141,7 @@ export const getAllIndividualProducts = async (req, res) => {
 export const getIndividualProductsByProduct = async (req, res) => {
   try {
     const { product_id } = req.params;
-    const { status, limit = 50, offset = 0, batch_number } = req.query;
+    const { status, limit = 50, offset = 0, batch_number, quality_grade, search, start_date, end_date } = req.query;
 
     let query = { product_id };
 
@@ -150,8 +154,56 @@ export const getIndividualProductsByProduct = async (req, res) => {
       query.batch_number = batch_number;
     }
 
+    // Filter by quality_grade if provided
+    if (quality_grade && quality_grade !== 'all') {
+      query.quality_grade = quality_grade;
+    }
+
+    // Filter by search term (QR code, ID, or inspector)
+    if (search) {
+      query.$or = [
+        { qr_code: { $regex: search, $options: 'i' } },
+        { id: { $regex: search, $options: 'i' } },
+        { inspector: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Filter by date range (production_date, completion_date, or created_at)
+    if (start_date || end_date) {
+      const dateConditions = [];
+      const dateQuery = {};
+      
+      if (start_date) {
+        dateQuery.$gte = new Date(start_date);
+      }
+      if (end_date) {
+        // Set end date to end of day
+        const endDate = new Date(end_date);
+        endDate.setHours(23, 59, 59, 999);
+        dateQuery.$lte = endDate;
+      }
+      
+      if (Object.keys(dateQuery).length > 0) {
+        // Check if production_date, completion_date, or created_at falls within range
+        dateConditions.push({ production_date: dateQuery });
+        dateConditions.push({ completion_date: dateQuery });
+        dateConditions.push({ created_at: dateQuery });
+        
+        // Combine with existing $or if present
+        if (query.$or) {
+          query.$and = [
+            { $or: query.$or },
+            { $or: dateConditions }
+          ];
+          delete query.$or;
+        } else {
+          query.$or = dateConditions;
+        }
+      }
+    }
+
     const individualProducts = await IndividualProduct.find(query)
-      .sort({ createdAt: -1 })
+      .sort({ created_at: -1 })
       .limit(parseInt(limit))
       .skip(parseInt(offset));
 

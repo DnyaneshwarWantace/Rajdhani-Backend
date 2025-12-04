@@ -15,7 +15,11 @@ const router = express.Router();
 router.use(authenticate);
 
 // Check page access for supplier routes
-router.use(checkPageAccess('suppliers'));
+console.log('🔧 Supplier routes: Setting up checkPageAccess middleware');
+router.use((req, res, next) => {
+  console.log(`🔧 Supplier route middleware: ${req.method} ${req.path}`);
+  return checkPageAccess('suppliers')(req, res, next);
+});
 
 // Supplier CRUD routes with action permissions
 router.post('/', checkPermission('supplier_create'), createSupplier);

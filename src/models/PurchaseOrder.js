@@ -140,7 +140,22 @@ const purchaseOrderSchema = new mongoose.Schema({
   material_details: {
     type: mongoose.Schema.Types.Mixed,
     default: {}
-  }
+  },
+  status_history: [{
+    status: {
+      type: String,
+      required: true
+    },
+    changed_by: {
+      type: String,
+      required: true
+    },
+    changed_at: {
+      type: Date,
+      default: Date.now
+    },
+    notes: String
+  }]
 }, {
   timestamps: true,
   collection: 'purchase_orders'

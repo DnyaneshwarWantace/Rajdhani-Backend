@@ -64,9 +64,37 @@ export const getSuppliers = async (req, res) => {
 
     const suppliers = await Supplier.find(query).sort({ name: 1 });
 
+    // Calculate actual order stats from purchase orders for each supplier
+    const suppliersWithStats = await Promise.all(
+      suppliers.map(async (supplier) => {
+        // Get all purchase orders for this supplier (match by both supplier_id and supplier_name)
+        const purchaseOrders = await PurchaseOrder.find({
+          $or: [
+            { supplier_id: supplier.id },
+            { supplier_name: supplier.name }
+          ]
+        });
+        
+        // Calculate actual stats from purchase orders
+        const actualTotalOrders = purchaseOrders.length;
+        const actualTotalValue = purchaseOrders.reduce((sum, po) => {
+          // Use total_amount from pricing if available, otherwise from root
+          const amount = po.pricing?.total_amount || po.total_amount || 0;
+          return sum + (typeof amount === 'number' ? amount : parseFloat(amount) || 0);
+        }, 0);
+
+        // Convert to plain object and update with actual stats
+        const supplierObj = supplier.toObject();
+        supplierObj.total_orders = actualTotalOrders;
+        supplierObj.total_value = actualTotalValue;
+
+        return supplierObj;
+      })
+    );
+
     res.json({
       success: true,
-      data: suppliers
+      data: suppliersWithStats
     });
   } catch (error) {
     console.error('Error fetching suppliers:', error);

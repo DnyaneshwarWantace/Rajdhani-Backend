@@ -4,6 +4,7 @@ import RawMaterial from '../models/RawMaterial.js';
 import StockMovement from '../models/StockMovement.js';
 import { updateSupplierPerformance } from './supplierController.js';
 import { generatePurchaseOrderId, generateOrderNumber } from '../utils/idGenerator.js';
+import { logPurchaseOrderCreate, logPurchaseOrderStatusChange, logPurchaseOrderUpdate, logPurchaseOrderDelete } from '../utils/detailedLogger.js';
 
 // Create a new purchase order
 export const createPurchaseOrder = async (req, res) => {
@@ -13,6 +14,17 @@ export const createPurchaseOrder = async (req, res) => {
       id: await generatePurchaseOrderId(),
       order_number: await generateOrderNumber()
     };
+
+    // Extract userNotes from material_details and set it as notes
+    // Don't store the entire material_details in notes field
+    if (orderData.material_details && orderData.material_details.userNotes) {
+      orderData.notes = orderData.material_details.userNotes;
+      // Remove userNotes from material_details to avoid duplication
+      delete orderData.material_details.userNotes;
+    } else if (!orderData.notes) {
+      // If no userNotes and no notes, set notes to empty string
+      orderData.notes = '';
+    }
 
     // Check if supplier exists
     if (orderData.supplier_id) {
@@ -25,8 +37,25 @@ export const createPurchaseOrder = async (req, res) => {
       }
     }
 
+    // Set created_by from req.user or req.body
+    orderData.created_by = req.user ? req.user.id : (orderData.created_by || 'system');
+
     const purchaseOrder = new PurchaseOrder(orderData);
+    
+    // Add initial status to history
+    if (!purchaseOrder.status_history || purchaseOrder.status_history.length === 0) {
+      purchaseOrder.status_history = [{
+        status: purchaseOrder.status || 'pending',
+        changed_by: orderData.created_by || 'system',
+        changed_at: new Date(),
+        notes: 'Order created'
+      }];
+    }
+    
     await purchaseOrder.save();
+
+    // Log purchase order creation
+    await logPurchaseOrderCreate(req, purchaseOrder);
 
     // Update supplier's total orders count
     if (orderData.supplier_id) {
@@ -52,15 +81,37 @@ export const createPurchaseOrder = async (req, res) => {
 // Get all purchase orders with filtering
 export const getPurchaseOrders = async (req, res) => {
   try {
-    const { search, status, supplier_id, limit = 50, offset = 0 } = req.query;
+    const { search, status, supplier_id, material_id, limit = 50, offset = 0 } = req.query;
 
     let query = {};
 
-    if (search) {
+    // Filter by material_id - check items array (priority filter)
+    if (material_id) {
       query.$or = [
-        { order_number: { $regex: search, $options: 'i' } },
-        { supplier_name: { $regex: search, $options: 'i' } }
+        { 'items.material_id': material_id },
+        { 'material_details.materialId': material_id }
       ];
+    }
+
+    // Search filter (only if material_id is not specified, or combine with material_id)
+    if (search) {
+      const searchConditions = [
+        { order_number: { $regex: search, $options: 'i' } },
+        { supplier_name: { $regex: search, $options: 'i' } },
+        { 'items.material_name': { $regex: search, $options: 'i' } },
+        { 'material_details.materialName': { $regex: search, $options: 'i' } }
+      ];
+      
+      if (material_id) {
+        // If material_id is set, combine with search
+        query.$and = [
+          { $or: query.$or },
+          { $or: searchConditions }
+        ];
+        delete query.$or;
+      } else {
+        query.$or = searchConditions;
+      }
     }
 
     if (status && status !== 'all') {
@@ -300,7 +351,7 @@ const updateMaterialStock = async (order) => {
 // Delete purchase order
 export const deletePurchaseOrder = async (req, res) => {
   try {
-    const order = await PurchaseOrder.findOneAndDelete({ id: req.params.id });
+    const order = await PurchaseOrder.findOne({ id: req.params.id });
 
     if (!order) {
       return res.status(404).json({
@@ -308,6 +359,11 @@ export const deletePurchaseOrder = async (req, res) => {
         error: 'Purchase order not found'
       });
     }
+
+    // Log deletion before deleting
+    await logPurchaseOrderDelete(req, order);
+
+    await PurchaseOrder.findOneAndDelete({ id: req.params.id });
 
     res.json({
       success: true,
@@ -361,7 +417,7 @@ export const getPurchaseOrderStats = async (req, res) => {
 export const updateOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { newStatus } = req.body;
+    const { newStatus, notes } = req.body;
 
     const order = await PurchaseOrder.findOne({ id: orderId });
 
@@ -373,6 +429,7 @@ export const updateOrderStatus = async (req, res) => {
     }
 
     const previousStatus = order.status;
+    const changedBy = req.user ? req.user.id : 'system';
 
     // Update status
     order.status = newStatus;
@@ -382,7 +439,33 @@ export const updateOrderStatus = async (req, res) => {
       order.actual_delivery = new Date();
     }
 
+    // Add to status history
+    if (!order.status_history) {
+      order.status_history = [];
+    }
+    
+    // Add initial status if history is empty
+    if (order.status_history.length === 0) {
+      order.status_history.push({
+        status: previousStatus,
+        changed_by: order.created_by || 'system',
+        changed_at: order.createdAt || new Date(),
+        notes: 'Order created'
+      });
+    }
+    
+    // Add new status change to history
+    order.status_history.push({
+      status: newStatus,
+      changed_by: changedBy,
+      changed_at: new Date(),
+      notes: notes || `Status changed from ${previousStatus} to ${newStatus}`
+    });
+
     await order.save();
+
+    // Log status change
+    await logPurchaseOrderStatusChange(req, order, previousStatus, newStatus);
 
     // Handle status change actions
     await handleStatusChange(order, previousStatus, newStatus);

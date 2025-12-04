@@ -7,30 +7,31 @@ import {
   resetPassword,
   updateUserStatus
 } from '../controllers/userController.js';
-import { authenticate, authorize, checkPermission } from '../middleware/authMiddleware.js';
+import { authenticate, authorize } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-// All routes require authentication
+// All routes require authentication and admin role (settings page is admin-only)
 router.use(authenticate);
+router.use(authorize('admin'));
 
-// Get all users (requires user_view permission)
-router.get('/', checkPermission('user_view'), getUsers);
+// Get all users
+router.get('/', getUsers);
 
-// Get user by ID (requires user_view permission)
-router.get('/:id', checkPermission('user_view'), getUserById);
+// Get user by ID
+router.get('/:id', getUserById);
 
-// Update user (requires user_edit permission)
-router.put('/:id', checkPermission('user_edit'), updateUser);
+// Update user
+router.put('/:id', updateUser);
 
-// Delete user (requires user_delete permission)
-router.delete('/:id', checkPermission('user_delete'), deleteUser);
+// Delete user
+router.delete('/:id', deleteUser);
 
-// Reset user password (Admin only)
-router.post('/:id/reset-password', authorize('admin'), resetPassword);
+// Reset user password
+router.post('/:id/reset-password', resetPassword);
 
-// Update user status (requires user_edit permission)
-router.patch('/:id/status', checkPermission('user_edit'), updateUserStatus);
+// Update user status
+router.patch('/:id/status', updateUserStatus);
 
 export default router;
 

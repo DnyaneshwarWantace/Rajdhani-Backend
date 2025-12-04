@@ -5,6 +5,7 @@ import Product from '../models/Product.js';
 import IndividualProduct from '../models/IndividualProduct.js';
 import RawMaterial from '../models/RawMaterial.js';
 import { generateOrderId, generateOrderNumber, generateOrderItemId } from '../utils/idGenerator.js';
+import { logOrderCreate, logOrderUpdate, logOrderStatusChange, logOrderDelete } from '../utils/detailedLogger.js';
 
 // Create a new order
 export const createOrder = async (req, res) => {
@@ -136,9 +137,15 @@ export const createOrder = async (req, res) => {
       );
     }
 
+    // Fetch the updated order with final values
+    const finalOrder = await Order.findOne({ id: order.id });
+
+    // Log order creation with details
+    await logOrderCreate(req, finalOrder);
+
     res.status(201).json({
       success: true,
-      data: order
+      data: finalOrder
     });
   } catch (error) {
     console.error('Error creating order:', error);
@@ -260,6 +267,18 @@ export const updateOrder = async (req, res) => {
     }
 
     const oldStatus = order.status;
+
+    // Track changes for logging
+    const changes = {};
+    Object.keys(updateData).forEach(key => {
+      if (order[key] !== updateData[key]) {
+        changes[key] = {
+          old: order[key],
+          new: updateData[key]
+        };
+      }
+    });
+
     Object.assign(order, updateData);
     
     // If status changed to dispatched or delivered, trigger stock deduction
@@ -274,6 +293,16 @@ export const updateOrder = async (req, res) => {
     }
 
     await order.save();
+
+    // Log order update with changes
+    if (Object.keys(changes).length > 0) {
+      // If status changed, log status change specifically
+      if (changes.status) {
+        await logOrderStatusChange(req, order, oldStatus, order.status);
+      } else {
+        await logOrderUpdate(req, order, changes);
+      }
+    }
 
     res.json({
       success: true,
@@ -309,6 +338,9 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
+    // Store old status for logging
+    const oldStatus = order.status;
+
     // Update status and set appropriate timestamp
     order.status = status;
     const now = new Date();
@@ -339,6 +371,9 @@ export const updateOrderStatus = async (req, res) => {
     }
 
     await order.save();
+
+    // Log status change
+    await logOrderStatusChange(req, order, oldStatus, status);
 
     res.json({
       success: true,
@@ -785,6 +820,9 @@ export const deleteOrder = async (req, res) => {
 
     // Delete order
     await Order.findOneAndDelete({ id: req.params.id });
+
+    // Log order deletion
+    await logOrderDelete(req, order);
 
     res.json({
       success: true,

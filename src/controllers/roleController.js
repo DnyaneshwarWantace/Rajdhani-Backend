@@ -23,7 +23,11 @@ const getAllRoles = async (req, res) => {
 // Get active roles only
 const getActiveRoles = async (req, res) => {
   try {
-    const roles = await Role.find({ is_active: true }).sort({ label: 1 });
+    // Only return admin and user roles
+    const roles = await Role.find({ 
+      is_active: true,
+      name: { $in: ['admin', 'user'] }
+    }).sort({ label: 1 });
     
     // Format for frontend dropdown
     const formattedRoles = roles.map(role => ({

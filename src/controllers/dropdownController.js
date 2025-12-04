@@ -1,5 +1,6 @@
 import DropdownOption from '../models/DropdownOption.js';
 import { generateId } from '../utils/idGenerator.js';
+import { logDropdownCreate, logDropdownUpdate, logDropdownDelete } from '../utils/detailedLogger.js';
 
 // Get all dropdown options
 export const getAllDropdownOptions = async (req, res) => {
@@ -253,6 +254,9 @@ export const createDropdownOption = async (req, res) => {
 
     await dropdownOption.save();
 
+    // Log dropdown creation
+    await logDropdownCreate(req, dropdownOption);
+
     res.status(201).json({
       success: true,
       data: dropdownOption
@@ -300,10 +304,20 @@ export const updateDropdownOption = async (req, res) => {
       }
     }
 
+    const oldOption = { ...option.toObject() };
     Object.assign(option, updates);
     option.updated_at = new Date();
 
     await option.save();
+
+    // Log dropdown update
+    const changes = {};
+    Object.keys(updates).forEach(key => {
+      if (oldOption[key] !== option[key]) {
+        changes[key] = { old: oldOption[key], new: option[key] };
+      }
+    });
+    await logDropdownUpdate(req, option, changes);
 
     res.json({
       success: true,
@@ -332,10 +346,14 @@ export const toggleActiveStatus = async (req, res) => {
       });
     }
 
+    const oldStatus = option.is_active;
     option.is_active = !option.is_active;
     option.updated_at = new Date();
 
     await option.save();
+
+    // Log dropdown update (status change)
+    await logDropdownUpdate(req, option, { is_active: { old: oldStatus, new: option.is_active } });
 
     res.json({
       success: true,
@@ -372,6 +390,9 @@ export const deleteDropdownOption = async (req, res) => {
         error: 'Cannot delete "NA" option - it is a system default'
       });
     }
+
+    // Log dropdown deletion before deleting
+    await logDropdownDelete(req, option);
 
     await DropdownOption.findOneAndDelete({ id });
 

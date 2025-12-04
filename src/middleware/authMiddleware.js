@@ -99,6 +99,7 @@ const authorize = (...allowedRoles) => {
 };
 
 // Check if user has specific permission for an action
+// Simplified: All authenticated users have permission for all actions (except settings/activity-logs which are handled by checkPageAccess)
 const checkPermission = (action) => {
   return async (req, res, next) => {
     try {
@@ -109,122 +110,9 @@ const checkPermission = (action) => {
         });
       }
 
-      // Admin always has permission
-      if (req.user.role === 'admin') {
-        return next();
-      }
-
-      // Get user's permissions
-      const permissions = await Permission.findOne({ role: req.user.role });
-
-      if (!permissions) {
-        return res.status(403).json({
-          success: false,
-          error: 'No permissions found for user role'
-        });
-      }
-
-      // DELETE actions are special - only allow if explicitly granted or admin
-      if (action.includes('_delete') || action.includes('delete')) {
-        if (permissions.action_permissions[action]) {
-          return next();
-        }
-        return res.status(403).json({
-          success: false,
-          error: `Permission denied: ${action} (delete operations require explicit permission)`
-        });
-      }
-
-      // Map action to page
-      const actionToPageMap = {
-        // Production actions (all production-related routes)
-        'production_view': 'production',
-        'production_create': 'production',
-        'production_edit': 'production',
-        'production_start': 'production',
-        'production_complete': 'production',
-        'machine_view': 'production',
-        'machine_create': 'production',
-        'machine_edit': 'production',
-        
-        // Product actions (all product-related routes)
-        'product_view': 'products',
-        'product_create': 'products',
-        'product_edit': 'products',
-        'individual_product_view': 'products',
-        'individual_product_create': 'products',
-        'individual_product_edit': 'products',
-        
-        // Order actions (all order-related routes)
-        'order_view': 'orders',
-        'order_create': 'orders',
-        'order_edit': 'orders',
-        'order_approve': 'orders',
-        'order_deliver': 'orders',
-        
-        // Material actions (all material-related routes)
-        'material_view': 'materials',
-        'material_create': 'materials',
-        'material_edit': 'materials',
-        'material_restock': 'materials',
-        
-        // Customer/Supplier actions
-        'customer_view': 'customers',
-        'customer_create': 'customers',
-        'customer_edit': 'customers',
-        'supplier_view': 'suppliers',
-        'supplier_create': 'suppliers',
-        'supplier_edit': 'suppliers',
-      };
-
-      const page = actionToPageMap[action];
-
-      // If action maps to a page, check page access
-      if (page) {
-        if (permissions.page_permissions[page]) {
-          console.log(`✅ Allowing ${action} for user with ${page} page access`);
-          return next();
-        }
-      }
-
-      // SPECIAL CASE: If user has orders page access, allow access to related modules
-      if (permissions.page_permissions.orders) {
-        // Allow customer operations (to create/edit customers for orders)
-        if (action.startsWith('customer_') && !action.includes('delete')) {
-          console.log(`✅ Allowing ${action} for user with orders page access`);
-          return next();
-        }
-        // Allow product/material/individual_product operations (to select items for orders)
-        if (action.startsWith('product_') || action.startsWith('material_') || action.startsWith('individual_product_')) {
-          if (!action.includes('delete')) {
-            // Allow all product/material operations except delete (to select items for orders)
-            console.log(`✅ Allowing ${action} for user with orders page access`);
-            return next();
-          }
-        }
-      }
-
-      // SPECIAL CASE: If user has production page access, allow access to related modules
-      if (permissions.page_permissions.production) {
-        // Allow product/material/individual_product operations (to add products/materials to production)
-        if (action.startsWith('product_') || action.startsWith('material_') || action.startsWith('individual_product_')) {
-          if (!action.includes('delete')) {
-            // Allow all product/material operations except delete
-            console.log(`✅ Allowing ${action} for user with production page access`);
-            return next();
-          }
-        }
-      }
-
-      // Fallback: Check explicit action permission (for backward compatibility)
-      if (permissions.action_permissions[action]) {
-        return next();
-      }
-
-      return res.status(403).json({
-        success: false,
-        error: `Permission denied: ${action}`
-      });
+      // All authenticated users have permission for all actions
+      // Settings and activity-logs are already restricted by checkPageAccess
+      return next();
     } catch (error) {
       console.error('Permission check error:', error);
       res.status(500).json({
@@ -236,58 +124,40 @@ const checkPermission = (action) => {
 };
 
 // Check if user has access to a page
+// Simplified: All authenticated users have access to all pages except 'settings' and 'activity-logs' (admin only)
 const checkPageAccess = (page) => {
   return async (req, res, next) => {
     try {
+      console.log(`🔍 checkPageAccess called for page: ${page}, path: ${req.path}`);
+      
       if (!req.user) {
+        console.log(`❌ No user found for ${page} page`);
         return res.status(401).json({
           success: false,
           error: 'User not authenticated'
         });
       }
 
-      // Admin always has access
-      if (req.user.role === 'admin') {
-        return next();
-      }
+      console.log(`👤 User: ${req.user.email}, Role: ${req.user.role}, Checking page: ${page}`);
 
-      // Get user's permissions
-      const permissions = await Permission.findOne({ role: req.user.role });
-
-      if (!permissions) {
-        return res.status(403).json({
-          success: false,
-          error: 'No permissions found for user role'
-        });
-      }
-
-      // Check if user has access to the page
-      if (permissions.page_permissions[page]) {
-        return next();
-      }
-
-      // SPECIAL CASE: If user has orders page access, allow access to related pages
-      if (permissions.page_permissions.orders) {
-        // Allow products, customers, materials, suppliers pages (needed for order management)
-        if (page === 'products' || page === 'customers' || page === 'materials' || page === 'suppliers') {
-          console.log(`✅ Allowing ${page} page access for user with orders permission`);
-          return next();
+      // Only restrict 'settings' and 'activity-logs' pages to admin
+      // All other pages (customers, suppliers, products, orders, materials, production, etc.) are accessible to all authenticated users
+      const restrictedPages = ['settings', 'activity-logs'];
+      
+      if (restrictedPages.includes(page)) {
+        if (req.user.role !== 'admin') {
+          console.log(`❌ Access denied: ${req.user.email} (${req.user.role}) tried to access ${page} page`);
+          return res.status(403).json({
+            success: false,
+            error: `Access denied to ${page} page. Admin access required.`
+          });
         }
       }
 
-      // SPECIAL CASE: If user has production page access, allow access to related pages
-      if (permissions.page_permissions.production) {
-        // Allow products, materials, and individual products pages (needed for production management)
-        if (page === 'products' || page === 'materials') {
-          console.log(`✅ Allowing ${page} page access for user with production permission`);
-          return next();
-        }
-      }
-
-      return res.status(403).json({
-        success: false,
-        error: `Access denied to ${page} page`
-      });
+      // All other pages are accessible to all authenticated users
+      // This includes: customers, suppliers, products, orders, materials, production, etc.
+      console.log(`✅ Allowing access: ${req.user.email} (${req.user.role}) accessing ${page} page`);
+      return next();
     } catch (error) {
       console.error('Page access check error:', error);
       res.status(500).json({

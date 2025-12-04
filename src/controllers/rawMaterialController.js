@@ -2,6 +2,7 @@ import RawMaterial from '../models/RawMaterial.js';
 import StockMovement from '../models/StockMovement.js';
 import DropdownOption from '../models/DropdownOption.js';
 import { generateRawMaterialId, generateId } from '../utils/idGenerator.js';
+import { logMaterialCreate, logMaterialUpdate, logMaterialStockUpdate, logMaterialDelete } from '../utils/detailedLogger.js';
 
 // Calculate material status
 const calculateMaterialStatus = (currentStock, minThreshold, maxCapacity) => {
@@ -63,10 +64,14 @@ export const createRawMaterial = async (req, res) => {
       ...materialData,
       status,
       total_value,
-      last_restocked
+      last_restocked,
+      created_by: req.user ? req.user.id : (materialData.created_by || 'system')
     });
 
     await rawMaterial.save();
+
+    // Log material creation
+    await logMaterialCreate(req, rawMaterial);
 
     res.status(201).json({
       success: true,
@@ -168,6 +173,17 @@ export const updateRawMaterial = async (req, res) => {
       });
     }
 
+    // Track changes for logging
+    const changes = {};
+    Object.keys(updateData).forEach(key => {
+      if (material[key] !== updateData[key]) {
+        changes[key] = {
+          old: material[key],
+          new: updateData[key]
+        };
+      }
+    });
+
     // Calculate new status if stock levels changed
     const newCurrentStock = updateData.current_stock ?? material.current_stock;
     const newMinThreshold = updateData.min_threshold ?? material.min_threshold;
@@ -196,6 +212,11 @@ export const updateRawMaterial = async (req, res) => {
 
     await material.save();
 
+    // Log material update with changes
+    if (Object.keys(changes).length > 0) {
+      await logMaterialUpdate(req, material, changes);
+    }
+
     res.json({
       success: true,
       data: material
@@ -212,7 +233,7 @@ export const updateRawMaterial = async (req, res) => {
 // Delete raw material
 export const deleteRawMaterial = async (req, res) => {
   try {
-    const material = await RawMaterial.findOneAndDelete({ id: req.params.id });
+    const material = await RawMaterial.findOne({ id: req.params.id });
 
     if (!material) {
       return res.status(404).json({
@@ -220,6 +241,11 @@ export const deleteRawMaterial = async (req, res) => {
         error: 'Raw material not found'
       });
     }
+
+    await RawMaterial.findOneAndDelete({ id: req.params.id });
+
+    // Log material deletion
+    await logMaterialDelete(req, material);
 
     res.json({
       success: true,
@@ -350,6 +376,9 @@ export const adjustStock = async (req, res) => {
       notes
     });
     await stockMovement.save();
+
+    // Log stock adjustment
+    await logMaterialStockUpdate(req, material, previousStock, newStock, reason || 'Stock adjustment');
 
     res.json({
       success: true,

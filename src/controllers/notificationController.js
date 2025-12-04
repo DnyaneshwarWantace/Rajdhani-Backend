@@ -4,6 +4,27 @@ import { generateId } from '../utils/idGenerator.js';
 // Create a new notification
 const createNotification = async (req, res) => {
   try {
+    // Validate required fields
+    const { type, title, message, priority, status, module } = req.body;
+    
+    if (!type || !title || !message || !priority || !status || !module) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields',
+        details: 'type, title, message, priority, status, and module are required'
+      });
+    }
+
+    // Validate module enum
+    const validModules = ['orders', 'products', 'materials', 'production'];
+    if (!validModules.includes(module)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid module value',
+        details: `Module must be one of: ${validModules.join(', ')}. Received: ${module}`
+      });
+    }
+
     const notificationData = {
       id: await generateId('NOTIF'),
       ...req.body
@@ -22,7 +43,8 @@ const createNotification = async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to create notification',
-      details: error.message
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };

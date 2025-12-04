@@ -30,7 +30,7 @@ const rawMaterialSchema = new mongoose.Schema({
     type: String,
     required: true,
     trim: true,
-    enum: ['kg', 'liters', 'rolls', 'meters', 'sqm', 'pieces', 'boxes']
+    enum: ['kg', 'liters', 'rolls', 'meters', 'sqm', 'pieces', 'boxes', 'L', 'gallons', 'pounds', 'yards', 'tons']
   },
   min_threshold: {
     type: Number,
@@ -95,6 +95,10 @@ const rawMaterialSchema = new mongoose.Schema({
   },
   last_restocked: {
     type: Date
+  },
+  created_by: {
+    type: String,
+    default: 'system'
   }
 }, {
   timestamps: true,

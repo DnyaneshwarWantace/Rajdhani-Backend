@@ -18,7 +18,11 @@ const router = express.Router();
 router.use(authenticate);
 
 // Check page access for customer routes
-router.use(checkPageAccess('customers'));
+console.log('🔧 Customer routes: Setting up checkPageAccess middleware');
+router.use((req, res, next) => {
+  console.log(`🔧 Customer route middleware: ${req.method} ${req.path}`);
+  return checkPageAccess('customers')(req, res, next);
+});
 
 // Customer CRUD routes with action permissions
 router.post('/', checkPermission('customer_create'), createCustomer);

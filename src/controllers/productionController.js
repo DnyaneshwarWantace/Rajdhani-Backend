@@ -2,6 +2,13 @@ import { ProductionBatch, ProductionStep, ProductionFlow, ProductionFlowStep, Ma
 import ProductionMachine from '../models/ProductionMachine.js';
 import ProductionWaste from '../models/ProductionWaste.js';
 import { generateId } from '../utils/idGenerator.js';
+import {
+  logProductionStart,
+  logProductionMachineAssign,
+  logProductionStepComplete,
+  logProductionWastageAdd,
+  logProductionComplete
+} from '../utils/detailedLogger.js';
 
 // NOTE: For backward-compatibility with previous endpoints, the "productions"
 // endpoints operate on ProductionBatch documents (Supabase parity)
@@ -38,6 +45,10 @@ export const createProduction = async (req, res) => {
     });
 
     await batch.save();
+
+    // Log production batch creation
+    await logProductionStart(req, batch);
+
     return res.status(201).json({ success: true, data: batch });
   } catch (error) {
     console.error('createProduction error:', error);
@@ -93,6 +104,12 @@ export const updateProduction = async (req, res) => {
       { new: true }
     );
     if (!updated) return res.status(404).json({ success: false, error: 'Not found' });
+
+    // Log production completion if status changed to completed
+    if (update.status === 'completed') {
+      await logProductionComplete(req, updated);
+    }
+
     return res.json({ success: true, data: updated });
   } catch (error) {
     console.error('updateProduction error:', error);
@@ -223,8 +240,15 @@ export const createProductionWaste = async (req, res) => {
     
     const waste = new ProductionWaste(wasteData);
     await waste.save();
-    
+
     console.log('✅ Waste created successfully:', waste.id);
+
+    // Log wastage addition with details
+    const batch = await ProductionBatch.findOne({ id: wasteData.production_id || wasteData.batch_id });
+    if (batch) {
+      await logProductionWastageAdd(req, batch, wasteData);
+    }
+
     return res.status(201).json({ success: true, data: waste });
   } catch (error) {
     console.error('createProductionWaste error:', error);
@@ -333,13 +357,11 @@ export const returnWasteToInventory = async (req, res) => {
     // Update raw material stock
     material.current_stock = newStock;
     material.status = newStatus;
-    material.updated_at = new Date();
     await material.save();
 
     // Update waste status to 'reused' and add added_at timestamp
     waste.status = 'reused';
     waste.added_at = new Date();
-    waste.updated_at = new Date();
     await waste.save();
 
     return res.json({
@@ -500,11 +522,33 @@ export const updateProductionFlowStep = async (req, res) => {
     const { id } = req.params;
     const update = req.body || {};
     const updated = await ProductionFlowStep.findOneAndUpdate({ id }, { ...update }, { new: true });
-    
+
     if (!updated) {
       return res.status(404).json({ success: false, error: 'Production flow step not found' });
     }
-    
+
+    // Log step completion if status changed to completed
+    if (update.status === 'completed') {
+      const flow = await ProductionFlow.findOne({ id: updated.flow_id });
+      if (flow) {
+        const batch = await ProductionBatch.findOne({ id: flow.production_product_id || flow.id });
+        if (batch) {
+          await logProductionStepComplete(req, batch, updated.step_name);
+        }
+      }
+    }
+
+    // Log machine assignment if machine_id was added
+    if (update.machine_id && !updated.machine_id) {
+      const flow = await ProductionFlow.findOne({ id: updated.flow_id });
+      if (flow) {
+        const batch = await ProductionBatch.findOne({ id: flow.production_product_id || flow.id });
+        if (batch) {
+          await logProductionMachineAssign(req, batch, update.machine_id);
+        }
+      }
+    }
+
     return res.json({ success: true, data: updated });
   } catch (error) {
     console.error('updateProductionFlowStep error:', error);
