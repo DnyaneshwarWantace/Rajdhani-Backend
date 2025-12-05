@@ -33,10 +33,10 @@ const httpServer = createServer(app);
 const PORT = process.env.PORT || 5000;
 
 // CORS configuration from environment variables
-// FRONTEND_URLS should be comma-separated list: "https://rajdhani.wantace.com,http://localhost:3000"
+// FRONTEND_URLS should be comma-separated list: "http://localhost:8000,http://localhost:3000"
 const FRONTEND_URLS = process.env.FRONTEND_URLS 
   ? process.env.FRONTEND_URLS.split(',').map(url => url.trim())
-  : ['https://rajdhani.wantace.com', 'http://localhost:3000'];
+  : ['http://localhost:8000', 'http://localhost:3000'];
 
 console.log('🌐 CORS Allowed Origins:', FRONTEND_URLS);
 

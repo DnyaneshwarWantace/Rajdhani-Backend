@@ -102,19 +102,70 @@ export const logActivity = async (req, details) => {
 
 // Product-specific loggers
 export const logProductCreate = async (req, product) => {
-  const description = `Created product "${product.name}" (${product.product_id})` +
-    (product.recipe ? ` with recipe containing ${product.recipe.length} materials` : '');
+  // Build detailed description with product information
+  const productDetails = [];
+  
+  // Basic info
+  if (product.category) productDetails.push(`Category: ${product.category}`);
+  if (product.subcategory) productDetails.push(`Subcategory: ${product.subcategory}`);
+  if (product.color) productDetails.push(`Color: ${product.color}`);
+  if (product.pattern) productDetails.push(`Pattern: ${product.pattern}`);
+  
+  // Dimensions
+  if (product.length && product.length_unit) {
+    productDetails.push(`Length: ${product.length} ${product.length_unit}`);
+  }
+  if (product.width && product.width_unit) {
+    productDetails.push(`Width: ${product.width} ${product.width_unit}`);
+  }
+  if (product.weight && product.weight_unit) {
+    productDetails.push(`Weight: ${product.weight} ${product.weight_unit}`);
+  }
+  
+  // Stock info
+  if (product.base_quantity !== undefined) {
+    productDetails.push(`Quantity: ${product.base_quantity}`);
+  }
+  if (product.unit) {
+    productDetails.push(`Unit: ${product.unit}`);
+  }
+  
+  // Recipe info
+  if (product.recipe && product.recipe.length > 0) {
+    productDetails.push(`Recipe: ${product.recipe.length} material(s)`);
+  } else {
+    productDetails.push(`Recipe: None`);
+  }
+  
+  // Build description
+  const productId = product.id || 'N/A';
+  const detailsText = productDetails.length > 0 ? ` - ${productDetails.join(', ')}` : '';
+  const description = `Created product "${product.name}" (${productId})${detailsText}`;
 
   return logActivity(req, {
     action: 'PRODUCT_CREATE',
     category: 'PRODUCT',
     description,
-    resourceId: product.product_id,
+    resourceId: productId,
     resourceType: 'Product',
     metadata: {
       product_name: product.name,
+      product_id: productId,
+      category: product.category || null,
+      subcategory: product.subcategory || null,
+      color: product.color || null,
+      pattern: product.pattern || null,
+      length: product.length || null,
+      length_unit: product.length_unit || null,
+      width: product.width || null,
+      width_unit: product.width_unit || null,
+      weight: product.weight || null,
+      weight_unit: product.weight_unit || null,
+      base_quantity: product.base_quantity !== undefined ? product.base_quantity : 0,
+      unit: product.unit || null,
       has_recipe: !!product.recipe,
-      recipe_count: product.recipe?.length || 0
+      recipe_count: product.recipe?.length || 0,
+      individual_stock_tracking: product.individual_stock_tracking || false
     }
   });
 };
