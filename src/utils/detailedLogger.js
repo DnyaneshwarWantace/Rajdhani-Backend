@@ -776,6 +776,63 @@ export const logIndividualProductAdd = async (req, individualProduct, product) =
   });
 };
 
+// Supplier loggers
+export const logSupplierCreate = async (req, supplier) => {
+  const description = `Created supplier "${supplier.name}" (${supplier.id})`;
+  
+  return logActivity(req, {
+    action: 'SUPPLIER_CREATE',
+    category: 'SUPPLIER',
+    description,
+    resourceId: supplier.id,
+    resourceType: 'Supplier',
+    metadata: {
+      supplier_name: supplier.name,
+      supplier_id: supplier.id,
+      contact_person: supplier.contact_person,
+      email: supplier.email,
+      phone: supplier.phone,
+      status: supplier.status
+    }
+  });
+};
+
+export const logSupplierUpdate = async (req, supplier, changes) => {
+  const changedFields = Object.keys(changes).join(', ');
+  const description = `Updated supplier "${supplier.name}" (${supplier.id}): ${changedFields}`;
+  
+  return logActivity(req, {
+    action: 'SUPPLIER_UPDATE',
+    category: 'SUPPLIER',
+    description,
+    resourceId: supplier.id,
+    resourceType: 'Supplier',
+    changes,
+    metadata: {
+      supplier_name: supplier.name,
+      supplier_id: supplier.id,
+      fields_changed: Object.keys(changes)
+    }
+  });
+};
+
+export const logSupplierDelete = async (req, supplier) => {
+  const description = `Deleted supplier "${supplier.name}" (${supplier.id})`;
+  
+  return logActivity(req, {
+    action: 'SUPPLIER_DELETE',
+    category: 'SUPPLIER',
+    description,
+    resourceId: supplier.id,
+    resourceType: 'Supplier',
+    metadata: {
+      supplier_name: supplier.name,
+      supplier_id: supplier.id,
+      contact_person: supplier.contact_person
+    }
+  });
+};
+
 export const logIndividualProductUpdate = async (req, individualProduct, changes) => {
   const changedFields = Object.keys(changes).join(', ');
   const description = `Updated individual product "${individualProduct.id}": ${changedFields}`;

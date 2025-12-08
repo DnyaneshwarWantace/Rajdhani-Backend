@@ -2,6 +2,7 @@ import Supplier from '../models/Supplier.js';
 import RawMaterial from '../models/RawMaterial.js';
 import PurchaseOrder from '../models/PurchaseOrder.js';
 import { generateSupplierId } from '../utils/idGenerator.js';
+import { logSupplierCreate, logSupplierUpdate, logSupplierDelete } from '../utils/detailedLogger.js';
 
 // Create a new supplier
 export const createSupplier = async (req, res) => {
@@ -29,6 +30,9 @@ export const createSupplier = async (req, res) => {
     });
 
     await supplier.save();
+
+    // Log supplier creation
+    await logSupplierCreate(req, supplier);
 
     res.status(201).json({
       success: true,
@@ -154,8 +158,24 @@ export const updateSupplier = async (req, res) => {
       }
     }
 
+    // Track changes for logging
+    const changes = {};
+    Object.keys(updateData).forEach(key => {
+      if (supplier[key] !== updateData[key]) {
+        changes[key] = {
+          old: supplier[key],
+          new: updateData[key]
+        };
+      }
+    });
+
     Object.assign(supplier, updateData);
     await supplier.save();
+
+    // Log supplier update if there were changes
+    if (Object.keys(changes).length > 0) {
+      await logSupplierUpdate(req, supplier, changes);
+    }
 
     res.json({
       success: true,
@@ -190,6 +210,9 @@ export const deleteSupplier = async (req, res) => {
         error: `Cannot delete supplier. ${materialsCount} raw material(s) are associated with this supplier.`
       });
     }
+
+    // Log supplier deletion before deleting
+    await logSupplierDelete(req, supplier);
 
     await Supplier.findOneAndDelete({ id: req.params.id });
 
