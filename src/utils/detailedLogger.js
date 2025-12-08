@@ -833,6 +833,65 @@ export const logSupplierDelete = async (req, supplier) => {
   });
 };
 
+// Customer loggers
+export const logCustomerCreate = async (req, customer) => {
+  const description = `Created customer "${customer.name}" (${customer.id})`;
+  
+  return logActivity(req, {
+    action: 'CUSTOMER_CREATE',
+    category: 'CUSTOMER',
+    description,
+    resourceId: customer.id,
+    resourceType: 'Customer',
+    metadata: {
+      customer_name: customer.name,
+      customer_id: customer.id,
+      email: customer.email,
+      phone: customer.phone,
+      customer_type: customer.customer_type,
+      status: customer.status,
+      company_name: customer.company_name
+    }
+  });
+};
+
+export const logCustomerUpdate = async (req, customer, changes) => {
+  const changedFields = Object.keys(changes).join(', ');
+  const description = `Updated customer "${customer.name}" (${customer.id}): ${changedFields}`;
+  
+  return logActivity(req, {
+    action: 'CUSTOMER_UPDATE',
+    category: 'CUSTOMER',
+    description,
+    resourceId: customer.id,
+    resourceType: 'Customer',
+    changes,
+    metadata: {
+      customer_name: customer.name,
+      customer_id: customer.id,
+      fields_changed: Object.keys(changes)
+    }
+  });
+};
+
+export const logCustomerDelete = async (req, customer) => {
+  const description = `Deleted customer "${customer.name}" (${customer.id})`;
+  
+  return logActivity(req, {
+    action: 'CUSTOMER_DELETE',
+    category: 'CUSTOMER',
+    description,
+    resourceId: customer.id,
+    resourceType: 'Customer',
+    metadata: {
+      customer_name: customer.name,
+      customer_id: customer.id,
+      email: customer.email,
+      company_name: customer.company_name
+    }
+  });
+};
+
 export const logIndividualProductUpdate = async (req, individualProduct, changes) => {
   const changedFields = Object.keys(changes).join(', ');
   const description = `Updated individual product "${individualProduct.id}": ${changedFields}`;

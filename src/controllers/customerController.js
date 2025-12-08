@@ -1,6 +1,7 @@
 import Customer from '../models/Customer.js';
 import Order from '../models/Order.js';
 import { generateCustomerId } from '../utils/idGenerator.js';
+import { logCustomerCreate, logCustomerUpdate, logCustomerDelete } from '../utils/detailedLogger.js';
 
 // Create a new customer
 export const createCustomer = async (req, res) => {
@@ -29,6 +30,9 @@ export const createCustomer = async (req, res) => {
     });
 
     await customer.save();
+
+    // Log customer creation
+    await logCustomerCreate(req, customer);
 
     res.status(201).json({
       success: true,
@@ -147,8 +151,24 @@ export const updateCustomer = async (req, res) => {
       }
     }
 
+    // Track changes for logging
+    const changes = {};
+    Object.keys(updateData).forEach(key => {
+      if (customer[key] !== updateData[key]) {
+        changes[key] = {
+          old: customer[key],
+          new: updateData[key]
+        };
+      }
+    });
+
     Object.assign(customer, updateData);
     await customer.save();
+
+    // Log customer update if there were changes
+    if (Object.keys(changes).length > 0) {
+      await logCustomerUpdate(req, customer, changes);
+    }
 
     res.json({
       success: true,
@@ -183,6 +203,9 @@ export const deleteCustomer = async (req, res) => {
         error: `Cannot delete customer. ${orderCount} order(s) are associated with this customer.`
       });
     }
+
+    // Log customer deletion before deleting
+    await logCustomerDelete(req, customer);
 
     await Customer.findOneAndDelete({ id: req.params.id });
 
