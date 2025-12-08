@@ -34,11 +34,14 @@ const PORT = process.env.PORT || 5000;
 
 // CORS configuration from environment variables
 // FRONTEND_URLS should be comma-separated list: "http://localhost:8000,http://localhost:3000"
+// In development, allow all origins for network access
 const FRONTEND_URLS = process.env.FRONTEND_URLS 
   ? process.env.FRONTEND_URLS.split(',').map(url => url.trim())
-  : ['http://localhost:8000', 'http://localhost:3000'];
+  : process.env.NODE_ENV === 'production' 
+    ? ['http://localhost:8000', 'http://localhost:3000']
+    : true; // Allow all origins in development for network access
 
-console.log('🌐 CORS Allowed Origins:', FRONTEND_URLS);
+console.log('🌐 CORS Allowed Origins:', FRONTEND_URLS === true ? 'All origins (development)' : FRONTEND_URLS);
 
 // Initialize Socket.IO
 // When behind a proxy (like Nginx), Socket.IO needs path configuration
