@@ -255,23 +255,3 @@ export const getSupplierStats = async (req, res) => {
   }
 };
 
-// Update supplier performance based on order completion
-export const updateSupplierPerformance = async (supplierId, rating) => {
-  try {
-    const supplier = await Supplier.findOne({ id: supplierId });
-    if (!supplier) return;
-
-    // Calculate new average rating
-    const currentRating = supplier.performance_rating || 5;
-    const totalOrders = supplier.total_orders || 0;
-
-    const newRating = ((currentRating * totalOrders) + rating) / (totalOrders + 1);
-
-    supplier.performance_rating = Math.round(newRating * 10) / 10; // Round to 1 decimal
-    await supplier.save();
-
-    console.log(`✅ Updated supplier ${supplier.name} performance to ${supplier.performance_rating}`);
-  } catch (error) {
-    console.error('Error updating supplier performance:', error);
-  }
-};

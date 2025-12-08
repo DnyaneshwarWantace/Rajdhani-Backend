@@ -2,7 +2,6 @@ import PurchaseOrder from '../models/PurchaseOrder.js';
 import Supplier from '../models/Supplier.js';
 import RawMaterial from '../models/RawMaterial.js';
 import StockMovement from '../models/StockMovement.js';
-import { updateSupplierPerformance } from './supplierController.js';
 import { generatePurchaseOrderId, generateOrderNumber } from '../utils/idGenerator.js';
 import { logPurchaseOrderCreate, logPurchaseOrderStatusChange, logPurchaseOrderUpdate, logPurchaseOrderDelete } from '../utils/detailedLogger.js';
 
@@ -223,11 +222,6 @@ const handleStatusChange = async (order, previousStatus, newStatus) => {
     if (newStatus === 'delivered') {
       await updateMaterialStock(order);
 
-      // Update supplier performance
-      if (order.supplier_id) {
-        const rating = 8; // Default good rating, can be customized
-        await updateSupplierPerformance(order.supplier_id, rating);
-      }
     }
   } catch (error) {
     console.error('Error handling status change:', error);
@@ -541,11 +535,6 @@ export const markAsDelivered = async (req, res) => {
     // Update stock for each item
     await updateMaterialStock(order);
 
-    // Update supplier performance
-    if (order.supplier_id) {
-      const rating = 8; // Default good rating
-      await updateSupplierPerformance(order.supplier_id, rating);
-    }
 
     res.json({
       success: true,
