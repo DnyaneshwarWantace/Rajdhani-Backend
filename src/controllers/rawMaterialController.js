@@ -138,7 +138,13 @@ export const getRawMaterials = async (req, res) => {
 // Get raw material by ID
 export const getRawMaterialById = async (req, res) => {
   try {
-    const material = await RawMaterial.findOne({ id: req.params.id });
+    // Try to find by custom id field first, then by MongoDB _id
+    let material = await RawMaterial.findOne({ id: req.params.id });
+    
+    // If not found by custom id, try MongoDB _id
+    if (!material) {
+      material = await RawMaterial.findById(req.params.id);
+    }
 
     if (!material) {
       return res.status(404).json({
@@ -164,7 +170,13 @@ export const getRawMaterialById = async (req, res) => {
 export const updateRawMaterial = async (req, res) => {
   try {
     const updateData = req.body;
-    const material = await RawMaterial.findOne({ id: req.params.id });
+    // Try to find by custom id field first, then by MongoDB _id
+    let material = await RawMaterial.findOne({ id: req.params.id });
+    
+    // If not found by custom id, try MongoDB _id
+    if (!material) {
+      material = await RawMaterial.findById(req.params.id);
+    }
 
     if (!material) {
       return res.status(404).json({
@@ -233,7 +245,13 @@ export const updateRawMaterial = async (req, res) => {
 // Delete raw material
 export const deleteRawMaterial = async (req, res) => {
   try {
-    const material = await RawMaterial.findOne({ id: req.params.id });
+    // Try to find by custom id field first, then by MongoDB _id
+    let material = await RawMaterial.findOne({ id: req.params.id });
+    
+    // If not found by custom id, try MongoDB _id
+    if (!material) {
+      material = await RawMaterial.findById(req.params.id);
+    }
 
     if (!material) {
       return res.status(404).json({
@@ -242,7 +260,8 @@ export const deleteRawMaterial = async (req, res) => {
       });
     }
 
-    await RawMaterial.findOneAndDelete({ id: req.params.id });
+    // Delete using the found material's _id (MongoDB)
+    await RawMaterial.findByIdAndDelete(material._id);
 
     // Log material deletion
     await logMaterialDelete(req, material);
@@ -321,7 +340,13 @@ export const getMaterialsRequiringReorder = async (req, res) => {
 export const adjustStock = async (req, res) => {
   try {
     const { quantity, reason, operator, notes } = req.body;
-    const material = await RawMaterial.findOne({ id: req.params.id });
+    // Try to find by custom id field first, then by MongoDB _id
+    let material = await RawMaterial.findOne({ id: req.params.id });
+    
+    // If not found by custom id, try MongoDB _id
+    if (!material) {
+      material = await RawMaterial.findById(req.params.id);
+    }
 
     if (!material) {
       return res.status(404).json({

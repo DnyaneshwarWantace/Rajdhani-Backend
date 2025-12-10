@@ -61,8 +61,9 @@ app.use(cors({
   origin: FRONTEND_URLS,
   credentials: true
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Increase payload size limit to 50MB for JSON and URL-encoded data
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Request logging middleware
 app.use((req, res, next) => {
