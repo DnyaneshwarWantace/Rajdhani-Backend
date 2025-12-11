@@ -90,6 +90,7 @@ export const createRawMaterial = async (req, res) => {
 // Get all raw materials with filtering
 export const getRawMaterials = async (req, res) => {
   try {
+    console.time('⏱️ Get Materials Query');
     const { search, category, status, supplier_id, limit = 50, offset = 0 } = req.query;
 
     let query = {};
@@ -117,12 +118,18 @@ export const getRawMaterials = async (req, res) => {
       query.supplier_id = supplier_id;
     }
 
+    // Use lean() for faster queries (returns plain JS objects instead of Mongoose documents)
+    // Fixed: Removed corrupted material with 4.5MB base64 image
     const materials = await RawMaterial.find(query)
-      .sort({ createdAt: -1 })
+      .sort({ created_at: -1 })
       .limit(parseInt(limit))
-      .skip(parseInt(offset));
+      .skip(parseInt(offset))
+      .lean();
 
     const count = await RawMaterial.countDocuments(query);
+
+    console.timeEnd('⏱️ Get Materials Query');
+    console.log(`✅ Returned ${materials.length} materials (total: ${count})`);
 
     res.json({
       success: true,
@@ -309,26 +316,52 @@ export const deleteRawMaterial = async (req, res) => {
 // Get inventory statistics
 export const getInventoryStats = async (req, res) => {
   try {
-    const materials = await RawMaterial.find({});
+    console.time('⏱️ Material Stats Query');
+    // OPTIMIZED: Use MongoDB aggregation instead of loading all docs into memory
+    const [statsResult] = await RawMaterial.aggregate([
+      {
+        $facet: {
+          statusCounts: [
+            {
+              $group: {
+                _id: '$status',
+                count: { $sum: 1 }
+              }
+            }
+          ],
+          totalStats: [
+            {
+              $group: {
+                _id: null,
+                totalMaterials: { $sum: 1 },
+                totalValue: { $sum: { $ifNull: ['$total_value', 0] } }
+              }
+            }
+          ]
+        }
+      }
+    ]);
 
-    const stats = materials.reduce((acc, material) => {
-      acc.totalMaterials++;
-      if (material.status === 'in-stock') acc.inStock++;
-      if (material.status === 'low-stock') acc.lowStock++;
-      if (material.status === 'out-of-stock') acc.outOfStock++;
-      if (material.status === 'overstock') acc.overstock++;
-      acc.totalValue += material.total_value || 0;
-      return acc;
-    }, {
-      totalMaterials: 0,
-      inStock: 0,
-      lowStock: 0,
-      outOfStock: 0,
-      overstock: 0,
-      totalValue: 0
+    // Process aggregation results
+    const statusCounts = {};
+    statsResult.statusCounts.forEach(item => {
+      statusCounts[item._id] = item.count;
     });
 
-    stats.averageValue = stats.totalMaterials > 0 ? stats.totalValue / stats.totalMaterials : 0;
+    const totalStats = statsResult.totalStats[0] || { totalMaterials: 0, totalValue: 0 };
+
+    const stats = {
+      totalMaterials: totalStats.totalMaterials,
+      inStock: statusCounts['in-stock'] || 0,
+      lowStock: statusCounts['low-stock'] || 0,
+      outOfStock: statusCounts['out-of-stock'] || 0,
+      overstock: statusCounts['overstock'] || 0,
+      totalValue: totalStats.totalValue,
+      averageValue: totalStats.totalMaterials > 0 ? totalStats.totalValue / totalStats.totalMaterials : 0
+    };
+
+    console.timeEnd('⏱️ Material Stats Query');
+    console.log('✅ Material Stats:', stats);
 
     res.json({
       success: true,

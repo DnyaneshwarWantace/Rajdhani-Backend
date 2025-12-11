@@ -138,13 +138,14 @@ export const createProduct = async (req, res) => {
 // Get all products with filtering
 export const getProducts = async (req, res) => {
   try {
-    const { 
-      search, 
-      category, 
-      status, 
+    console.time('⏱️ Get Products Query');
+    const {
+      search,
+      category,
+      status,
       individual_stock_tracking,
-      limit = 50, 
-      offset = 0 
+      limit = 50,
+      offset = 0
     } = req.query;
 
     let query = {};
@@ -237,6 +238,8 @@ export const getProducts = async (req, res) => {
         return product.toObject();
       });
 
+      console.timeEnd('⏱️ Get Products Query');
+      console.log(`✅ Returned ${productsWithStats.length} products (total: ${count})`);
       res.json({
         success: true,
         data: productsWithStats,
@@ -244,6 +247,8 @@ export const getProducts = async (req, res) => {
       });
     } else {
       // No products with individual tracking, return as is
+      console.timeEnd('⏱️ Get Products Query');
+      console.log(`✅ Returned ${products.length} products (total: ${count})`);
       res.json({
         success: true,
         data: products.map(p => p.toObject()),

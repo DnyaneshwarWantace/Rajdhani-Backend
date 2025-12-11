@@ -101,28 +101,17 @@ const rawMaterialSchema = new mongoose.Schema({
     default: 'system'
   }
 }, {
-  timestamps: true,
+  timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
   collection: 'raw_materials'
 });
 
-// Virtual for created_at (maps to createdAt)
-rawMaterialSchema.virtual('created_at').get(function() {
-  return this.createdAt;
-});
-
-// Virtual for updated_at (maps to updatedAt)
-rawMaterialSchema.virtual('updated_at').get(function() {
-  return this.updatedAt;
-});
-
-// Ensure virtuals are included in JSON output
-rawMaterialSchema.set('toJSON', { virtuals: true });
-rawMaterialSchema.set('toObject', { virtuals: true });
+// Timestamps are now using created_at and updated_at directly (no virtuals needed)
 
 // Index for better query performance
 rawMaterialSchema.index({ name: 1, supplier_name: 1 });
 rawMaterialSchema.index({ status: 1 });
 rawMaterialSchema.index({ category: 1 });
+rawMaterialSchema.index({ created_at: -1 }); // For sorting by newest first (matches Product model)
 
 // Pre-save middleware to calculate total_value
 rawMaterialSchema.pre('save', function(next) {
