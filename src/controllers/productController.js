@@ -3,6 +3,7 @@ import IndividualProduct from '../models/IndividualProduct.js';
 import DropdownOption from '../models/DropdownOption.js';
 import { generateProductId, generateQRCode } from '../utils/idGenerator.js';
 import { logProductCreate, logProductUpdate, logProductDelete } from '../utils/detailedLogger.js';
+import { escapeRegex } from '../utils/regexHelper.js';
 
 // Create a new product
 export const createProduct = async (req, res) => {
@@ -150,11 +151,12 @@ export const getProducts = async (req, res) => {
 
     // Apply filters
     if (search) {
+      const escapedSearch = escapeRegex(search);
       query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { category: { $regex: search, $options: 'i' } },
-        { color: { $regex: search, $options: 'i' } },
-        { pattern: { $regex: search, $options: 'i' } }
+        { name: { $regex: escapedSearch, $options: 'i' } },
+        { category: { $regex: escapedSearch, $options: 'i' } },
+        { color: { $regex: escapedSearch, $options: 'i' } },
+        { pattern: { $regex: escapedSearch, $options: 'i' } }
       ];
     }
 

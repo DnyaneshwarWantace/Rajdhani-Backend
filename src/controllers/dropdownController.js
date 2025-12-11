@@ -276,7 +276,22 @@ export const updateDropdownOption = async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
 
-    const option = await DropdownOption.findOne({ id });
+    // Try by MongoDB _id first if it looks like an ObjectId, then by custom id
+    let option = null;
+    
+    if (id.match(/^[0-9a-fA-F]{24}$/)) {
+      // Looks like MongoDB ObjectId, try _id first
+      try {
+        option = await DropdownOption.findById(id);
+      } catch (err) {
+        console.log('Not a valid ObjectId:', err.message);
+      }
+    }
+    
+    // If not found by _id, try custom id field
+    if (!option) {
+      option = await DropdownOption.findOne({ id });
+    }
 
     if (!option) {
       return res.status(404).json({
@@ -337,7 +352,22 @@ export const toggleActiveStatus = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const option = await DropdownOption.findOne({ id });
+    // Try by MongoDB _id first if it looks like an ObjectId, then by custom id
+    let option = null;
+    
+    if (id.match(/^[0-9a-fA-F]{24}$/)) {
+      // Looks like MongoDB ObjectId, try _id first
+      try {
+        option = await DropdownOption.findById(id);
+      } catch (err) {
+        console.log('Not a valid ObjectId:', err.message);
+      }
+    }
+    
+    // If not found by _id, try custom id field
+    if (!option) {
+      option = await DropdownOption.findOne({ id });
+    }
 
     if (!option) {
       return res.status(404).json({
@@ -374,7 +404,22 @@ export const deleteDropdownOption = async (req, res) => {
     const { id } = req.params;
 
     // Find the option first to check if it's protected
-    const option = await DropdownOption.findOne({ id });
+    // Try by MongoDB _id first if it looks like an ObjectId, then by custom id
+    let option = null;
+    
+    if (id.match(/^[0-9a-fA-F]{24}$/)) {
+      // Looks like MongoDB ObjectId, try _id first
+      try {
+        option = await DropdownOption.findById(id);
+      } catch (err) {
+        console.log('Not a valid ObjectId:', err.message);
+      }
+    }
+    
+    // If not found by _id, try custom id field
+    if (!option) {
+      option = await DropdownOption.findOne({ id });
+    }
 
     if (!option) {
       return res.status(404).json({
@@ -394,7 +439,8 @@ export const deleteDropdownOption = async (req, res) => {
     // Log dropdown deletion before deleting
     await logDropdownDelete(req, option);
 
-    await DropdownOption.findOneAndDelete({ id });
+    // Delete by _id to ensure we delete the correct document
+    await DropdownOption.findByIdAndDelete(option._id);
 
     res.json({
       success: true,

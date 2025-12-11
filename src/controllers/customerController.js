@@ -2,6 +2,7 @@ import Customer from '../models/Customer.js';
 import Order from '../models/Order.js';
 import { generateCustomerId } from '../utils/idGenerator.js';
 import { logCustomerCreate, logCustomerUpdate, logCustomerDelete } from '../utils/detailedLogger.js';
+import { escapeRegex } from '../utils/regexHelper.js';
 
 // Create a new customer
 export const createCustomer = async (req, res) => {
@@ -62,11 +63,12 @@ export const getCustomers = async (req, res) => {
 
     // Apply filters
     if (search) {
+      const escapedSearch = escapeRegex(search);
       query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-        { company_name: { $regex: search, $options: 'i' } }
+        { name: { $regex: escapedSearch, $options: 'i' } },
+        { email: { $regex: escapedSearch, $options: 'i' } },
+        { phone: { $regex: escapedSearch, $options: 'i' } },
+        { company_name: { $regex: escapedSearch, $options: 'i' } }
       ];
     }
 

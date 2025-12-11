@@ -4,6 +4,7 @@ import RawMaterial from '../models/RawMaterial.js';
 import StockMovement from '../models/StockMovement.js';
 import { generatePurchaseOrderId, generateOrderNumber } from '../utils/idGenerator.js';
 import { logPurchaseOrderCreate, logPurchaseOrderStatusChange, logPurchaseOrderUpdate, logPurchaseOrderDelete } from '../utils/detailedLogger.js';
+import { escapeRegex } from '../utils/regexHelper.js';
 
 // Create a new purchase order
 export const createPurchaseOrder = async (req, res) => {
@@ -94,13 +95,14 @@ export const getPurchaseOrders = async (req, res) => {
 
     // Search filter (only if material_id is not specified, or combine with material_id)
     if (search) {
+      const escapedSearch = escapeRegex(search);
       const searchConditions = [
-        { order_number: { $regex: search, $options: 'i' } },
-        { supplier_name: { $regex: search, $options: 'i' } },
-        { 'items.material_name': { $regex: search, $options: 'i' } },
-        { 'material_details.materialName': { $regex: search, $options: 'i' } }
+        { order_number: { $regex: escapedSearch, $options: 'i' } },
+        { supplier_name: { $regex: escapedSearch, $options: 'i' } },
+        { 'items.material_name': { $regex: escapedSearch, $options: 'i' } },
+        { 'material_details.materialName': { $regex: escapedSearch, $options: 'i' } }
       ];
-      
+
       if (material_id) {
         // If material_id is set, combine with search
         query.$and = [

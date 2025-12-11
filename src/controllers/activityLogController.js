@@ -1,4 +1,5 @@
 import ActivityLog from '../models/ActivityLog.js';
+import { escapeRegex } from '../utils/regexHelper.js';
 
 // Get activity logs with filtering and pagination
 export const getActivityLogs = async (req, res) => {
@@ -23,7 +24,10 @@ export const getActivityLogs = async (req, res) => {
     const filter = {};
 
     if (user_id) filter.user_id = user_id;
-    if (user_email) filter.user_email = { $regex: user_email, $options: 'i' };
+    if (user_email) {
+      const escapedEmail = escapeRegex(user_email);
+      filter.user_email = { $regex: escapedEmail, $options: 'i' };
+    }
     if (action) filter.action = action;
     if (action_category) filter.action_category = action_category;
     if (method) filter.method = method;
@@ -31,11 +35,12 @@ export const getActivityLogs = async (req, res) => {
 
     // Search across multiple fields
     if (search) {
+      const escapedSearch = escapeRegex(search);
       filter.$or = [
-        { user_name: { $regex: search, $options: 'i' } },
-        { user_email: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { endpoint: { $regex: search, $options: 'i' } }
+        { user_name: { $regex: escapedSearch, $options: 'i' } },
+        { user_email: { $regex: escapedSearch, $options: 'i' } },
+        { description: { $regex: escapedSearch, $options: 'i' } },
+        { endpoint: { $regex: escapedSearch, $options: 'i' } }
       ];
     }
 

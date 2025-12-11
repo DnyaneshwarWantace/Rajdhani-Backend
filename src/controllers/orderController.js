@@ -6,6 +6,7 @@ import IndividualProduct from '../models/IndividualProduct.js';
 import RawMaterial from '../models/RawMaterial.js';
 import { generateOrderId, generateOrderNumber, generateOrderItemId } from '../utils/idGenerator.js';
 import { logOrderCreate, logOrderUpdate, logOrderStatusChange, logOrderDelete } from '../utils/detailedLogger.js';
+import { escapeRegex } from '../utils/regexHelper.js';
 
 // Create a new order
 export const createOrder = async (req, res) => {
@@ -172,10 +173,11 @@ export const getOrders = async (req, res) => {
 
     // Apply filters
     if (search) {
+      const escapedSearch = escapeRegex(search);
       query.$or = [
-        { order_number: { $regex: search, $options: 'i' } },
-        { customer_name: { $regex: search, $options: 'i' } },
-        { customer_email: { $regex: search, $options: 'i' } }
+        { order_number: { $regex: escapedSearch, $options: 'i' } },
+        { customer_name: { $regex: escapedSearch, $options: 'i' } },
+        { customer_email: { $regex: escapedSearch, $options: 'i' } }
       ];
     }
 

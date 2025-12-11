@@ -3,6 +3,7 @@ import RawMaterial from '../models/RawMaterial.js';
 import PurchaseOrder from '../models/PurchaseOrder.js';
 import { generateSupplierId } from '../utils/idGenerator.js';
 import { logSupplierCreate, logSupplierUpdate, logSupplierDelete } from '../utils/detailedLogger.js';
+import { escapeRegex } from '../utils/regexHelper.js';
 
 // Create a new supplier
 export const createSupplier = async (req, res) => {
@@ -55,10 +56,11 @@ export const getSuppliers = async (req, res) => {
     let query = {};
 
     if (search) {
+      const escapedSearch = escapeRegex(search);
       query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { contact_person: { $regex: search, $options: 'i' } }
+        { name: { $regex: escapedSearch, $options: 'i' } },
+        { email: { $regex: escapedSearch, $options: 'i' } },
+        { contact_person: { $regex: escapedSearch, $options: 'i' } }
       ];
     }
 

@@ -3,6 +3,7 @@ import StockMovement from '../models/StockMovement.js';
 import DropdownOption from '../models/DropdownOption.js';
 import { generateRawMaterialId, generateId } from '../utils/idGenerator.js';
 import { logMaterialCreate, logMaterialUpdate, logMaterialStockUpdate, logMaterialDelete } from '../utils/detailedLogger.js';
+import { escapeRegex } from '../utils/regexHelper.js';
 
 // Calculate material status
 const calculateMaterialStatus = (currentStock, minThreshold, maxCapacity) => {
@@ -95,10 +96,12 @@ export const getRawMaterials = async (req, res) => {
 
     // Apply filters
     if (search) {
+      // Escape special regex characters to prevent regex syntax errors
+      const escapedSearch = escapeRegex(search);
       query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { type: { $regex: search, $options: 'i' } },
-        { category: { $regex: search, $options: 'i' } }
+        { name: { $regex: escapedSearch, $options: 'i' } },
+        { type: { $regex: escapedSearch, $options: 'i' } },
+        { category: { $regex: escapedSearch, $options: 'i' } }
       ];
     }
 
@@ -138,12 +141,20 @@ export const getRawMaterials = async (req, res) => {
 // Get raw material by ID
 export const getRawMaterialById = async (req, res) => {
   try {
-    // Try to find by custom id field first, then by MongoDB _id
-    let material = await RawMaterial.findOne({ id: req.params.id });
-    
-    // If not found by custom id, try MongoDB _id
-    if (!material) {
-      material = await RawMaterial.findById(req.params.id);
+    // Decode URL-encoded ID
+    const materialId = decodeURIComponent(req.params.id);
+
+    // Try to find by custom id field first
+    let material = await RawMaterial.findOne({ id: materialId });
+
+    // If not found by custom id, try MongoDB _id (only if it's a valid ObjectId)
+    if (!material && materialId.match(/^[0-9a-fA-F]{24}$/)) {
+      try {
+        material = await RawMaterial.findById(materialId);
+      } catch (err) {
+        // Invalid ObjectId format, ignore and continue
+        console.log('Not a valid ObjectId, skipping findById');
+      }
     }
 
     if (!material) {
@@ -170,12 +181,20 @@ export const getRawMaterialById = async (req, res) => {
 export const updateRawMaterial = async (req, res) => {
   try {
     const updateData = req.body;
-    // Try to find by custom id field first, then by MongoDB _id
-    let material = await RawMaterial.findOne({ id: req.params.id });
-    
-    // If not found by custom id, try MongoDB _id
-    if (!material) {
-      material = await RawMaterial.findById(req.params.id);
+    // Decode URL-encoded ID
+    const materialId = decodeURIComponent(req.params.id);
+
+    // Try to find by custom id field first
+    let material = await RawMaterial.findOne({ id: materialId });
+
+    // If not found by custom id, try MongoDB _id (only if it's a valid ObjectId)
+    if (!material && materialId.match(/^[0-9a-fA-F]{24}$/)) {
+      try {
+        material = await RawMaterial.findById(materialId);
+      } catch (err) {
+        // Invalid ObjectId format, ignore and continue
+        console.log('Not a valid ObjectId, skipping findById');
+      }
     }
 
     if (!material) {
@@ -245,12 +264,20 @@ export const updateRawMaterial = async (req, res) => {
 // Delete raw material
 export const deleteRawMaterial = async (req, res) => {
   try {
-    // Try to find by custom id field first, then by MongoDB _id
-    let material = await RawMaterial.findOne({ id: req.params.id });
-    
-    // If not found by custom id, try MongoDB _id
-    if (!material) {
-      material = await RawMaterial.findById(req.params.id);
+    // Decode URL-encoded ID
+    const materialId = decodeURIComponent(req.params.id);
+
+    // Try to find by custom id field first
+    let material = await RawMaterial.findOne({ id: materialId });
+
+    // If not found by custom id, try MongoDB _id (only if it's a valid ObjectId)
+    if (!material && materialId.match(/^[0-9a-fA-F]{24}$/)) {
+      try {
+        material = await RawMaterial.findById(materialId);
+      } catch (err) {
+        // Invalid ObjectId format, ignore and continue
+        console.log('Not a valid ObjectId, skipping findById');
+      }
     }
 
     if (!material) {
@@ -340,12 +367,20 @@ export const getMaterialsRequiringReorder = async (req, res) => {
 export const adjustStock = async (req, res) => {
   try {
     const { quantity, reason, operator, notes } = req.body;
-    // Try to find by custom id field first, then by MongoDB _id
-    let material = await RawMaterial.findOne({ id: req.params.id });
-    
-    // If not found by custom id, try MongoDB _id
-    if (!material) {
-      material = await RawMaterial.findById(req.params.id);
+    // Decode URL-encoded ID
+    const materialId = decodeURIComponent(req.params.id);
+
+    // Try to find by custom id field first
+    let material = await RawMaterial.findOne({ id: materialId });
+
+    // If not found by custom id, try MongoDB _id (only if it's a valid ObjectId)
+    if (!material && materialId.match(/^[0-9a-fA-F]{24}$/)) {
+      try {
+        material = await RawMaterial.findById(materialId);
+      } catch (err) {
+        // Invalid ObjectId format, ignore and continue
+        console.log('Not a valid ObjectId, skipping findById');
+      }
     }
 
     if (!material) {
@@ -423,13 +458,15 @@ export const adjustStock = async (req, res) => {
 export const getStockHistory = async (req, res) => {
   try {
     const { limit = 50, offset = 0 } = req.query;
-    
-    const movements = await StockMovement.find({ material_id: req.params.id })
+    // Decode URL-encoded ID
+    const materialId = decodeURIComponent(req.params.id);
+
+    const movements = await StockMovement.find({ material_id: materialId })
       .sort({ created_at: -1 })
       .limit(parseInt(limit))
       .skip(parseInt(offset));
 
-    const count = await StockMovement.countDocuments({ material_id: req.params.id });
+    const count = await StockMovement.countDocuments({ material_id: materialId });
 
     res.json({
       success: true,

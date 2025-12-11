@@ -2,6 +2,7 @@ import IndividualProduct from '../models/IndividualProduct.js';
 import Product from '../models/Product.js';
 import { generateIndividualProductId, generateQRCode } from '../utils/idGenerator.js';
 import { logIndividualProductGenerate } from '../utils/detailedLogger.js';
+import { escapeRegex } from '../utils/regexHelper.js';
 
 // Create individual products in bulk
 export const createIndividualProducts = async (req, res) => {
@@ -161,10 +162,11 @@ export const getIndividualProductsByProduct = async (req, res) => {
 
     // Filter by search term (QR code, ID, or inspector)
     if (search) {
+      const escapedSearch = escapeRegex(search);
       query.$or = [
-        { qr_code: { $regex: search, $options: 'i' } },
-        { id: { $regex: search, $options: 'i' } },
-        { inspector: { $regex: search, $options: 'i' } }
+        { qr_code: { $regex: escapedSearch, $options: 'i' } },
+        { id: { $regex: escapedSearch, $options: 'i' } },
+        { inspector: { $regex: escapedSearch, $options: 'i' } }
       ];
     }
 
