@@ -36,7 +36,12 @@ import {
   returnWasteToInventory,
   
   // Statistics
-  getProductionStats
+  getProductionStats,
+  
+  // Planning Draft State routes
+  savePlanningDraftState,
+  getPlanningDraftState,
+  deletePlanningDraftState
 } from '../controllers/productionController.js';
 import { authenticate, checkPermission, checkPageAccess } from '../middleware/authMiddleware.js';
 
@@ -86,5 +91,10 @@ router.put('/machines/:id', checkPermission('machine_edit'), updateProductionMac
 
 // Statistics
 router.get('/stats', checkPermission('production_view'), getProductionStats);
+
+// Planning Draft State routes
+router.post('/planning-draft', checkPermission('production_create'), savePlanningDraftState);
+router.get('/planning-draft/:product_id', checkPermission('production_view'), getPlanningDraftState);
+router.delete('/planning-draft/:product_id', checkPermission('production_edit'), deletePlanningDraftState);
 
 export default router;

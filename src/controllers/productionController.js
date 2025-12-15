@@ -1,6 +1,7 @@
 import { ProductionBatch, ProductionStep, ProductionFlow, ProductionFlowStep, MaterialConsumption } from '../models/Production.js';
 import ProductionMachine from '../models/ProductionMachine.js';
 import ProductionWaste from '../models/ProductionWaste.js';
+import PlanningDraftState from '../models/PlanningDraftState.js';
 import { generateId } from '../utils/idGenerator.js';
 import {
   logProductionStart,
@@ -581,6 +582,85 @@ export const getProductionStats = async (req, res) => {
     return res.json({ success: true, data: stats });
   } catch (error) {
     console.error('getProductionStats error:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Save planning draft state
+export const savePlanningDraftState = async (req, res) => {
+  try {
+    const { product_id, form_data, recipe_data, materials } = req.body;
+    const user_id = req.user.id;
+
+    if (!product_id) {
+      return res.status(400).json({ success: false, error: 'product_id is required' });
+    }
+
+    // Check if draft state already exists
+    let draftState = await PlanningDraftState.findOne({ product_id, user_id });
+
+    if (draftState) {
+      // Update existing draft state
+      draftState.form_data = form_data || draftState.form_data;
+      draftState.recipe_data = recipe_data || draftState.recipe_data;
+      draftState.materials = materials || draftState.materials;
+      draftState.updated_at = new Date();
+      await draftState.save();
+    } else {
+      // Create new draft state
+      const id = await generateId('DRAFT');
+      draftState = new PlanningDraftState({
+        id,
+        product_id,
+        user_id,
+        form_data: form_data || {},
+        recipe_data: recipe_data || null,
+        materials: materials || [],
+      });
+      await draftState.save();
+    }
+
+    return res.json({ success: true, data: draftState });
+  } catch (error) {
+    console.error('savePlanningDraftState error:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Get planning draft state
+export const getPlanningDraftState = async (req, res) => {
+  try {
+    const { product_id } = req.params;
+    const user_id = req.user.id;
+
+    const draftState = await PlanningDraftState.findOne({ product_id, user_id });
+
+    if (!draftState) {
+      return res.status(404).json({ success: false, error: 'Draft state not found' });
+    }
+
+    return res.json({ success: true, data: draftState });
+  } catch (error) {
+    console.error('getPlanningDraftState error:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Delete planning draft state
+export const deletePlanningDraftState = async (req, res) => {
+  try {
+    const { product_id } = req.params;
+    const user_id = req.user.id;
+
+    const draftState = await PlanningDraftState.findOneAndDelete({ product_id, user_id });
+
+    if (!draftState) {
+      return res.status(404).json({ success: false, error: 'Draft state not found' });
+    }
+
+    return res.json({ success: true, message: 'Draft state deleted successfully' });
+  } catch (error) {
+    console.error('deletePlanningDraftState error:', error);
     return res.status(500).json({ success: false, error: error.message });
   }
 };
