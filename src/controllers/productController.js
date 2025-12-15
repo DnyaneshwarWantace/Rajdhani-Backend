@@ -144,6 +144,12 @@ export const getProducts = async (req, res) => {
       category,
       status,
       individual_stock_tracking,
+      // Additional filters from frontend (can be string or string[])
+      color,
+      pattern,
+      length,
+      width,
+      weight,
       limit = 50,
       offset = 0
     } = req.query;
@@ -161,12 +167,105 @@ export const getProducts = async (req, res) => {
       ];
     }
 
-    if (category && category !== 'all') {
-      query.category = category;
+    // Helper to support both single value and multi-select arrays
+    const buildFilter = (value) => {
+      if (!value) return undefined;
+      if (Array.isArray(value)) {
+        const cleaned = value.filter(v => v && v !== 'all');
+        if (cleaned.length === 0) return undefined;
+        return { $in: cleaned };
+      }
+      if (value === 'all') return undefined;
+      return value;
+    };
+
+    const categoryFilter = buildFilter(category);
+    if (categoryFilter) {
+      query.category = categoryFilter;
     }
 
+    const subcategoryFilter = buildFilter(req.query.subcategory);
+    if (subcategoryFilter) {
+      query.subcategory = subcategoryFilter;
+    }
+
+    const colorFilter = buildFilter(color);
+    if (colorFilter) {
+      query.color = colorFilter;
+    }
+
+    const patternFilter = buildFilter(pattern);
+    if (patternFilter) {
+      query.pattern = patternFilter;
+    }
+
+    const lengthFilter = buildFilter(length);
+    if (lengthFilter) {
+      query.length = lengthFilter;
+    }
+
+    const widthFilter = buildFilter(width);
+    if (widthFilter) {
+      query.width = widthFilter;
+    }
+
+    const weightFilter = buildFilter(weight);
+    if (weightFilter) {
+      query.weight = weightFilter;
+    }
+
+    // Filter by stock status based on actual current_stock and reorder_point
+    // This ensures accurate filtering regardless of the stored status field
     if (status && status !== 'all') {
-      query.status = status;
+      const existingOr = query.$or; // Save search $or if it exists
+      
+      if (status === 'out-of-stock') {
+        // Out of stock: current_stock is 0
+        query.current_stock = 0;
+        // If we had a search $or, we need to combine with $and
+        if (existingOr) {
+          query.$and = [
+            { $or: existingOr },
+            { current_stock: 0 }
+          ];
+          delete query.$or;
+        }
+      } else if (status === 'low-stock') {
+        // Low stock: current_stock > 0 AND current_stock < min_stock_level (matches frontend logic)
+        query.$expr = {
+          $and: [
+            { $gt: [{ $ifNull: ['$current_stock', 0] }, 0] },
+            { $lt: [{ $ifNull: ['$current_stock', 0] }, { $ifNull: ['$min_stock_level', 0] }] }
+          ]
+        };
+        // If we had a search $or, combine with $and
+        if (existingOr) {
+          query.$and = [
+            { $or: existingOr },
+            { $expr: query.$expr }
+          ];
+          delete query.$expr;
+        }
+      } else if (status === 'in-stock') {
+        // In stock: current_stock >= min_stock_level (matches frontend logic)
+        query.$expr = {
+          $gte: [
+            { $ifNull: ['$current_stock', 0] },
+            { $ifNull: ['$min_stock_level', 0] }
+          ]
+        };
+        // If we had a search $or, combine with $and
+        if (existingOr) {
+          query.$and = [
+            { $or: existingOr },
+            { $expr: query.$expr }
+          ];
+          delete query.$expr;
+        }
+      } else {
+        // For other statuses (active, inactive, discontinued), use the status field
+        query.status = status;
+      }
     }
 
     if (individual_stock_tracking !== undefined) {

@@ -91,11 +91,22 @@ export const createRawMaterial = async (req, res) => {
 export const getRawMaterials = async (req, res) => {
   try {
     console.time('⏱️ Get Materials Query');
-    const { search, category, status, supplier_id, limit = 50, offset = 0 } = req.query;
+    const {
+      search,
+      category,
+      status,
+      supplier_id,
+      // Additional filters from frontend (can be string or string[])
+      type,
+      color,
+      supplier,
+      limit = 50,
+      offset = 0
+    } = req.query;
 
     let query = {};
 
-    // Apply filters
+    // Apply search filter
     if (search) {
       // Escape special regex characters to prevent regex syntax errors
       const escapedSearch = escapeRegex(search);
@@ -106,8 +117,37 @@ export const getRawMaterials = async (req, res) => {
       ];
     }
 
-    if (category && category !== 'all') {
-      query.category = category;
+    // Helper to support both single value and multi-select arrays
+    const buildFilter = (value) => {
+      if (!value) return undefined;
+      if (Array.isArray(value)) {
+        const cleaned = value.filter(v => v && v !== 'all');
+        if (cleaned.length === 0) return undefined;
+        return { $in: cleaned };
+      }
+      if (value === 'all') return undefined;
+      return value;
+    };
+
+    const categoryFilter = buildFilter(category);
+    if (categoryFilter) {
+      query.category = categoryFilter;
+    }
+
+    const typeFilter = buildFilter(type);
+    if (typeFilter) {
+      query.type = typeFilter;
+    }
+
+    const colorFilter = buildFilter(color);
+    if (colorFilter) {
+      query.color = colorFilter;
+    }
+
+    const supplierFilter = buildFilter(supplier);
+    if (supplierFilter) {
+      // Filter by supplier_name (used in UI)
+      query.supplier_name = supplierFilter;
     }
 
     if (status && status !== 'all') {
