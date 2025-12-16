@@ -9,12 +9,14 @@ const ProductionWasteSchema = new mongoose.Schema({
   product_name: { type: String, required: true },
   waste_type: {
     type: String,
-    enum: ['cutting_waste', 'defective_products', 'excess_material', 'contamination', 'expired_material', 'other'],
-    required: true
+    required: true,
+    trim: true
+    // No enum - values come from dropdown options (category: 'waste_type')
+    // Common values: 'Scrap', 'Defective', 'Excess' (and others added via dropdown management)
   },
   waste_category: {
     type: String,
-    enum: ['recyclable', 'reusable', 'disposable', 'hazardous', 'organic'],
+    enum: ['reusable', 'disposable'],
     required: true
   },
   quantity: { type: Number, required: true },
@@ -23,22 +25,12 @@ const ProductionWasteSchema = new mongoose.Schema({
   weight_unit: { type: String, default: 'kg' },
   waste_percentage: { type: Number, required: true },
   generation_date: { type: Date, required: true },
-  generation_stage: {
-    type: String,
-    enum: ['raw_material', 'cutting', 'weaving', 'finishing', 'packaging', 'quality_check'],
-    required: true
-  },
   reason: { type: String, required: true },
   description: { type: String },
   status: {
     type: String,
-    enum: ['generated', 'collected', 'processed', 'disposed', 'recycled', 'reused'],
+    enum: ['generated', 'disposed', 'reused', 'added_to_inventory'],
     default: 'generated'
-  },
-  disposal_method: {
-    type: String,
-    enum: ['recycle', 'reuse', 'dispose', 'sell', 'donate', 'return_to_supplier'],
-    default: 'dispose'
   },
   disposal_date: { type: Date },
   disposal_cost: { type: Number, default: 0 },
@@ -90,7 +82,6 @@ ProductionWasteSchema.index({ waste_type: 1 });
 ProductionWasteSchema.index({ waste_category: 1 });
 ProductionWasteSchema.index({ status: 1 });
 ProductionWasteSchema.index({ generation_date: -1 });
-ProductionWasteSchema.index({ generation_stage: 1 });
 
 const ProductionWaste = mongoose.model('ProductionWaste', ProductionWasteSchema);
 export default ProductionWaste;

@@ -150,8 +150,9 @@ export const getRawMaterials = async (req, res) => {
       query.supplier_name = supplierFilter;
     }
 
-    if (status && status !== 'all') {
-      query.status = status;
+    const statusFilter = buildFilter(status);
+    if (statusFilter) {
+      query.status = statusFilter;
     }
 
     if (supplier_id) {

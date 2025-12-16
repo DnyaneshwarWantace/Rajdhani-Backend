@@ -22,7 +22,27 @@ const PlanningDraftStateSchema = new mongoose.Schema({
     completion_date: { type: String, default: '' },
     notes: { type: String, default: '' }
   },
+  // Materials currently in the "requirements" section
   materials: [
+    {
+      material_id: String,
+      material_name: String,
+      material_type: { type: String, enum: ['raw_material', 'product'] },
+      quantity_per_sqm: Number,
+      unit: String,
+      required_quantity: Number,
+      available_quantity: Number,
+      status: { type: String, enum: ['available', 'low', 'unavailable'] },
+      shortage: Number,
+      cost_per_unit: Number,
+      specifications: String,
+      quality_requirements: String,
+      is_optional: Boolean,
+      waste_factor: Number
+    }
+  ],
+  // Materials that have been added to production (bottom section in planning UI)
+  consumed_materials: [
     {
       material_id: String,
       material_name: String,

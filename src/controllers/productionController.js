@@ -220,7 +220,6 @@ export const createProductionWaste = async (req, res) => {
       unit: data.unit || '',
       waste_percentage: data.waste_percentage || 0,
       generation_date: data.generation_date ? new Date(data.generation_date) : new Date(),
-      generation_stage: data.generation_stage || 'weaving',
       reason: data.reason || 'Waste generated during production',
       notes: data.notes || '',
       // Additional fields for waste recovery
@@ -323,7 +322,7 @@ export const returnWasteToInventory = async (req, res) => {
     }
 
     // Check if already added to inventory
-    if (waste.status === 'reused' || waste.added_at) {
+    if (waste.status === 'added_to_inventory' || waste.added_at) {
       return res.status(400).json({ success: false, error: 'Waste has already been returned to inventory' });
     }
 
@@ -360,8 +359,8 @@ export const returnWasteToInventory = async (req, res) => {
     material.status = newStatus;
     await material.save();
 
-    // Update waste status to 'reused' and add added_at timestamp
-    waste.status = 'reused';
+    // Update waste status to 'added_to_inventory' and add added_at timestamp
+    waste.status = 'added_to_inventory';
     waste.added_at = new Date();
     await waste.save();
 
@@ -589,7 +588,7 @@ export const getProductionStats = async (req, res) => {
 // Save planning draft state
 export const savePlanningDraftState = async (req, res) => {
   try {
-    const { product_id, form_data, recipe_data, materials } = req.body;
+    const { product_id, form_data, recipe_data, materials, consumed_materials } = req.body;
     const user_id = req.user.id;
 
     if (!product_id) {
@@ -604,6 +603,7 @@ export const savePlanningDraftState = async (req, res) => {
       draftState.form_data = form_data || draftState.form_data;
       draftState.recipe_data = recipe_data || draftState.recipe_data;
       draftState.materials = materials || draftState.materials;
+      draftState.consumed_materials = consumed_materials || draftState.consumed_materials || [];
       draftState.updated_at = new Date();
       await draftState.save();
     } else {
@@ -616,6 +616,7 @@ export const savePlanningDraftState = async (req, res) => {
         form_data: form_data || {},
         recipe_data: recipe_data || null,
         materials: materials || [],
+        consumed_materials: consumed_materials || [],
       });
       await draftState.save();
     }

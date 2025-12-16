@@ -254,17 +254,55 @@ export const updateRecipe = async (req, res) => {
 
     // Get product for logging
     const product = await Product.findOne({ id: recipe.product_id });
-    
-    // Get current materials count
-    const currentMaterials = await RecipeMaterial.find({ recipe_id: recipe.id });
-    const materialCount = currentMaterials.length;
 
-    Object.assign(recipe, updateData);
+    // Get current materials count (before update)
+    const currentMaterials = await RecipeMaterial.find({ recipe_id: recipe.id });
+    const previousMaterialCount = currentMaterials.length;
+
+    // If materials array is provided, replace RecipeMaterial entries
+    let newMaterialsCount = previousMaterialCount;
+    if (Array.isArray(updateData.materials)) {
+      // Remove existing materials for this recipe
+      await RecipeMaterial.deleteMany({ recipe_id: recipe.id });
+
+      let totalCostPerSQM = 0;
+      const incomingMaterials = updateData.materials;
+      const createdMaterials = [];
+
+      for (const m of incomingMaterials) {
+        const recipeMaterial = new RecipeMaterial({
+          id: await generateRecipeMaterialId(),
+          recipe_id: recipe.id,
+          material_id: m.material_id,
+          material_name: m.material_name,
+          material_type: m.material_type,
+          quantity_per_sqm: m.quantity_per_sqm,
+          unit: m.unit,
+          cost_per_unit: m.cost_per_unit || 0,
+          specifications: m.specifications,
+          quality_requirements: m.quality_requirements,
+          is_optional: m.is_optional || false,
+          waste_factor: m.waste_factor || 0
+        });
+
+        await recipeMaterial.save();
+        createdMaterials.push(recipeMaterial);
+        totalCostPerSQM += recipeMaterial.total_cost_per_sqm;
+      }
+
+      // Update recipe aggregate fields
+      recipe.total_cost_per_sqm = totalCostPerSQM;
+      newMaterialsCount = createdMaterials.length;
+    }
+
+    // Apply any other updates directly on the recipe document (excluding materials)
+    const { materials, ...recipeFields } = updateData;
+    Object.assign(recipe, recipeFields);
     await recipe.save();
 
-    // Log recipe update
+    // Log recipe update with new material count
     if (product) {
-      await logProductRecipeUpdate(req, product, recipe, materialCount);
+      await logProductRecipeUpdate(req, product, recipe, newMaterialsCount);
     }
 
     res.json({
