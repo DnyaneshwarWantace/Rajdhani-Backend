@@ -380,11 +380,44 @@ export const returnWasteToInventory = async (req, res) => {
 export const createProductionFlow = async (req, res) => {
   try {
     const data = req.body || {};
+    
+    // Use production_batch_id as primary identifier (clearer and consistent)
+    // Accept production_batch_id, production_product_id, or id for backward compatibility
+    const production_batch_id = data.production_batch_id || data.production_product_id || data.id;
+    
+    if (!production_batch_id) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'production_batch_id (or production_product_id) is required' 
+      });
+    }
+    
+    // Check if a flow already exists for this batch (each batch should have only one flow)
+    // Check both production_batch_id and production_product_id for backward compatibility
+    const existingFlow = await ProductionFlow.findOne({ 
+      $or: [
+        { production_batch_id },
+        { production_product_id: production_batch_id }
+      ]
+    });
+    
+    if (existingFlow) {
+      // Flow already exists for this batch - return the existing one instead of creating duplicate
+      console.log(`Flow already exists for batch ${production_batch_id}, returning existing flow: ${existingFlow.id}`);
+      return res.status(200).json({ 
+        success: true, 
+        data: existingFlow,
+        message: 'Flow already exists for this batch, returning existing flow'
+      });
+    }
+    
+    // Create new flow with unique ID
     const id = data.id || await generateId('FLOW');
     
     const flow = new ProductionFlow({
       id,
-      production_product_id: data.production_product_id || data.id,
+      production_batch_id: production_batch_id, // Primary: clear naming
+      production_product_id: production_batch_id, // For backward compatibility (same value)
       flow_name: data.flow_name || `Production Flow ${id}`,
       status: data.status || 'active',
       current_step: data.current_step || 1
@@ -401,11 +434,16 @@ export const createProductionFlow = async (req, res) => {
 export const getProductionFlowById = async (req, res) => {
   try {
     const { id } = req.params;
-    // Try to find by id first, then by production_product_id
+    // Try to find by id first, then by production_batch_id, then production_product_id
     let flow = await ProductionFlow.findOne({ id });
 
     if (!flow) {
-      // If not found by id, try finding by production_product_id
+      // If not found by id, try finding by production_batch_id
+      flow = await ProductionFlow.findOne({ production_batch_id: id });
+    }
+
+    if (!flow) {
+      // Fallback: check production_product_id (for old data)
       flow = await ProductionFlow.findOne({ production_product_id: id });
     }
 
@@ -430,12 +468,17 @@ export const getProductionFlowById = async (req, res) => {
 export const getProductionFlowByBatchId = async (req, res) => {
   try {
     const { batchId } = req.params;
-    // Flow ID should equal Batch ID, so check both id and production_product_id
-    let flow = await ProductionFlow.findOne({ id: batchId });
+    // Check production_batch_id first (primary), then production_product_id for backward compatibility
+    let flow = await ProductionFlow.findOne({ production_batch_id: batchId });
 
     if (!flow) {
-      // Also check production_product_id as fallback
+      // Fallback: check production_product_id (for old data)
       flow = await ProductionFlow.findOne({ production_product_id: batchId });
+    }
+
+    if (!flow) {
+      // Also check if batchId is actually a flow ID
+      flow = await ProductionFlow.findOne({ id: batchId });
     }
 
     if (!flow) {
@@ -478,27 +521,57 @@ export const updateProductionFlow = async (req, res) => {
 export const createProductionFlowStep = async (req, res) => {
   try {
     const data = req.body || {};
+    console.log('createProductionFlowStep received data:', JSON.stringify(data, null, 2));
+    
     const id = data.id || await generateId('STEP');
     
-    const step = new ProductionFlowStep({
+    // Accept both flow_id and production_flow_id (frontend sends production_flow_id)
+    const flow_id = data.flow_id || data.production_flow_id;
+    
+    if (!flow_id) {
+      console.error('Missing flow_id in request:', data);
+      return res.status(400).json({ 
+        success: false, 
+        error: 'flow_id (or production_flow_id) is required',
+        received: Object.keys(data)
+      });
+    }
+    
+    // Map step_number to order_index if provided (frontend sends step_number)
+    const order_index = data.order_index || data.step_number || 1;
+    
+    // Map inspector to inspector_name if provided
+    const inspector_name = data.inspector_name || data.inspector;
+    
+    const stepData = {
       id,
-      flow_id: data.flow_id,
-      step_name: data.step_name,
+      flow_id: flow_id,
+      step_name: data.step_name || 'Machine Operation',
       step_type: data.step_type || 'machine_operation',
       status: data.status || 'pending',
-      order_index: data.order_index || 1,
+      order_index: order_index,
       machine_id: data.machine_id,
-      inspector_name: data.inspector_name,
+      inspector_name: inspector_name,
       start_time: data.start_time,
       end_time: data.end_time,
-      notes: data.notes
-    });
+      notes: data.notes || data.description
+    };
+    
+    console.log('Creating ProductionFlowStep with data:', JSON.stringify(stepData, null, 2));
+    
+    const step = new ProductionFlowStep(stepData);
 
     await step.save();
+    console.log('ProductionFlowStep created successfully:', step.id);
     return res.status(201).json({ success: true, data: step });
   } catch (error) {
     console.error('createProductionFlowStep error:', error);
-    return res.status(500).json({ success: false, error: error.message });
+    console.error('Error stack:', error.stack);
+    return res.status(500).json({ 
+      success: false, 
+      error: error.message,
+      details: error.name === 'ValidationError' ? error.errors : undefined
+    });
   }
 };
 

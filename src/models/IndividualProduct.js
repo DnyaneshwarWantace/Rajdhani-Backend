@@ -66,7 +66,7 @@ const individualProductSchema = new mongoose.Schema({
   // Individual product specific fields
   status: {
     type: String,
-    enum: ['available', 'sold', 'damaged', 'returned', 'in_production', 'quality_check', 'reserved'],
+    enum: ['available', 'sold', 'damaged', 'returned', 'in_production', 'quality_check', 'reserved', 'used'],
     default: 'available'
   },
   

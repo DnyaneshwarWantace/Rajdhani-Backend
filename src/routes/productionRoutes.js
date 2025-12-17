@@ -68,9 +68,16 @@ router.put('/batches/:id', checkPermission('production_edit'), updateProductionB
 
 // Production Flow routes
 router.post('/flows', checkPermission('production_create'), createProductionFlow);
-router.get('/flows/:id', checkPermission('production_view'), getProductionFlowById);
+// Flow steps routes - more specific routes must come before generic :id routes
+router.get('/flows/:id/steps', checkPermission('production_view'), async (req, res) => {
+  // Map path parameter to query parameter for getProductionFlowSteps
+  req.query.flow_id = req.params.id;
+  await getProductionFlowSteps(req, res);
+});
 router.get('/flows/batch/:batchId', checkPermission('production_view'), getProductionFlowByBatchId);
+router.get('/flows/:id', checkPermission('production_view'), getProductionFlowById);
 router.put('/flows/:id', checkPermission('production_edit'), updateProductionFlow);
+// Flow steps routes - support query parameter
 router.post('/flow-steps', checkPermission('production_create'), createProductionFlowStep);
 router.get('/flow-steps', checkPermission('production_view'), getProductionFlowSteps);
 router.put('/flow-steps/:id', checkPermission('production_edit'), updateProductionFlowStep);

@@ -52,10 +52,11 @@ const ProductionStepSchema = new mongoose.Schema({
   collection: 'production_steps'
 });
 
-// Production Flows - matches Supabase production_flows table exactly
+// Production Flows - tracks workflow for a production batch
 const ProductionFlowSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
-  production_product_id: { type: String, required: true },
+  production_batch_id: { type: String, required: true, index: true }, // Primary: batch ID (clearer naming)
+  production_product_id: { type: String, required: false, index: true }, // Optional: for backward compatibility (same as batch_id)
   flow_name: { type: String, required: true },
   status: {
     type: String,
@@ -90,10 +91,13 @@ const ProductionFlowStepSchema = new mongoose.Schema({
   collection: 'production_flow_steps'
 });
 
-// Material Consumption - matches Supabase material_consumption table exactly
+// Material Consumption - NOTE: This is a simplified schema for backward compatibility
+// The actual MaterialConsumption model is in MaterialConsumption.js with full schema
+// This export is kept for backward compatibility but should use MaterialConsumption.js instead
 const MaterialConsumptionSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true },
-  production_product_id: { type: String, required: true },
+  production_batch_id: { type: String, required: true, index: true }, // Primary: batch ID
+  production_product_id: { type: String, required: false, index: true }, // Optional: for backward compatibility
   material_id: { type: String, required: true },
   material_name: { type: String, required: true },
   quantity_used: { type: Number, required: true },
@@ -115,13 +119,15 @@ ProductionStepSchema.index({ production_batch_id: 1 });
 ProductionStepSchema.index({ step_number: 1 });
 ProductionStepSchema.index({ status: 1 });
 
-ProductionFlowSchema.index({ production_product_id: 1 });
+ProductionFlowSchema.index({ production_batch_id: 1 });
+ProductionFlowSchema.index({ production_product_id: 1 }); // Keep for backward compatibility
 ProductionFlowSchema.index({ status: 1 });
 
 ProductionFlowStepSchema.index({ flow_id: 1 });
 ProductionFlowStepSchema.index({ order_index: 1 });
 
-MaterialConsumptionSchema.index({ production_product_id: 1 });
+MaterialConsumptionSchema.index({ production_batch_id: 1 });
+MaterialConsumptionSchema.index({ production_product_id: 1 }); // Keep for backward compatibility
 MaterialConsumptionSchema.index({ material_id: 1 });
 
 const ProductionBatch = mongoose.model('ProductionBatch', ProductionBatchSchema);
