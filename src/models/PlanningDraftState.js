@@ -49,7 +49,10 @@ const PlanningDraftStateSchema = new mongoose.Schema({
       material_type: { type: String, enum: ['raw_material', 'product'] },
       quantity_per_sqm: Number,
       unit: String,
-      required_quantity: Number,
+      required_quantity: Number, // Total quantity needed (e.g., 0.8 for 0.4 * 2 sqm)
+      actual_consumed_quantity: Number, // For products: actual fractional consumption (e.g., 0.8)
+      whole_product_count: Number, // For products: whole products needed (e.g., 1 for 0.8)
+      individual_product_ids: [String], // For products: selected individual product IDs
       available_quantity: Number,
       status: { type: String, enum: ['available', 'low', 'unavailable'] },
       shortage: Number,

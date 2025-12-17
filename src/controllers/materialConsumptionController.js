@@ -108,6 +108,7 @@ const createMaterialConsumption = async (req, res) => {
       material_name,
       material_type,
       quantity_used,
+      actual_consumed_quantity, // For products: actual fractional consumption (e.g., 2.4)
       unit,
       operator,
       machine_id,
@@ -177,6 +178,18 @@ const createMaterialConsumption = async (req, res) => {
     const randomStr = Math.random().toString(36).substr(2, 9);
     const uniqueId = `MATCONS-${timestamp}-${randomStr}`;
     
+    // For products: calculate actual_consumed_quantity if not provided
+    // quantity_used = whole products (e.g., 3), actual_consumed_quantity = actual recipe quantity (e.g., 2.4)
+    let actualConsumedQty = actual_consumed_quantity;
+    if (material_type === 'product' && actualConsumedQty === undefined) {
+      // If individual products are selected, actual_consumed_quantity should be the recipe quantity
+      // If not provided, use quantity_used as fallback (for backward compatibility)
+      actualConsumedQty = qtyUsed;
+    } else if (material_type === 'raw_material') {
+      // For raw materials, actual_consumed_quantity = quantity_used
+      actualConsumedQty = actual_consumed_quantity !== undefined ? actual_consumed_quantity : qtyUsed;
+    }
+    
     // Create material consumption record
     // Use production_batch_id consistently (batch ID is the source of truth)
     const consumptionData = {
@@ -188,7 +201,8 @@ const createMaterialConsumption = async (req, res) => {
       material_id,
       material_name,
       material_type,
-      quantity_used: qtyUsed,
+      quantity_used: qtyUsed, // Whole products count (e.g., 3)
+      actual_consumed_quantity: actualConsumedQty, // Actual recipe quantity (e.g., 2.4)
       unit,
       operator,
       machine_id,
