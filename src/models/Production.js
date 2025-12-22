@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import MaterialConsumption from './MaterialConsumption.js';
 
 // Production Batches - matches Supabase production_batches table exactly
 const ProductionBatchSchema = new mongoose.Schema({
@@ -22,7 +23,41 @@ const ProductionBatchSchema = new mongoose.Schema({
   },
   operator: { type: String },
   supervisor: { type: String },
-  notes: { type: String }
+  notes: { type: String },
+
+  // Stage tracking
+  planning_stage: {
+    status: { type: String, enum: ['draft', 'completed'], default: 'draft' },
+    started_by: { type: String },
+    started_at: { type: Date },
+    completed_by: { type: String },
+    completed_at: { type: Date },
+    materials_draft: { type: Array, default: [] },
+    materials_consumed: { type: Array, default: [] }
+  },
+  machine_stage: {
+    status: { type: String, enum: ['not_started', 'in_progress', 'completed'], default: 'not_started' },
+    started_by: { type: String },
+    started_at: { type: Date },
+    completed_by: { type: String },
+    completed_at: { type: Date }
+  },
+  wastage_stage: {
+    status: { type: String, enum: ['not_started', 'in_progress', 'completed'], default: 'not_started' },
+    started_by: { type: String },
+    started_at: { type: Date },
+    completed_by: { type: String },
+    completed_at: { type: Date },
+    has_wastage: { type: Boolean, default: false }
+  },
+  final_stage: {
+    status: { type: String, enum: ['not_started', 'completed'], default: 'not_started' },
+    started_by: { type: String },
+    started_at: { type: Date },
+    completed_by: { type: String },
+    completed_at: { type: Date },
+    products_count: { type: Number, default: 0 }
+  }
 }, {
   timestamps: true,
   collection: 'production_batches'
@@ -83,7 +118,8 @@ const ProductionFlowStepSchema = new mongoose.Schema({
   order_index: { type: Number, required: true },
   machine_id: { type: String },
   inspector_name: { type: String },
-  start_time: { type: Date },
+  shift: { type: String, enum: ['day', 'night'], default: 'day' },
+   start_time: { type: Date },
   end_time: { type: Date },
   notes: { type: String }
 }, {
@@ -91,22 +127,7 @@ const ProductionFlowStepSchema = new mongoose.Schema({
   collection: 'production_flow_steps'
 });
 
-// Material Consumption - NOTE: This is a simplified schema for backward compatibility
-// The actual MaterialConsumption model is in MaterialConsumption.js with full schema
-// This export is kept for backward compatibility but should use MaterialConsumption.js instead
-const MaterialConsumptionSchema = new mongoose.Schema({
-  id: { type: String, required: true, unique: true },
-  production_batch_id: { type: String, required: true, index: true }, // Primary: batch ID
-  production_product_id: { type: String, required: false, index: true }, // Optional: for backward compatibility
-  material_id: { type: String, required: true },
-  material_name: { type: String, required: true },
-  quantity_used: { type: Number, required: true },
-  unit: { type: String, required: true },
-  consumed_at: { type: Date, default: Date.now }
-}, {
-  timestamps: true,
-  collection: 'material_consumption'
-});
+// Material Consumption - Imported from MaterialConsumption.js to avoid duplicate model compilation
 
 // Indexes for efficient querying
 ProductionBatchSchema.index({ batch_number: 1 }, { unique: true });
@@ -126,15 +147,12 @@ ProductionFlowSchema.index({ status: 1 });
 ProductionFlowStepSchema.index({ flow_id: 1 });
 ProductionFlowStepSchema.index({ order_index: 1 });
 
-MaterialConsumptionSchema.index({ production_batch_id: 1 });
-MaterialConsumptionSchema.index({ production_product_id: 1 }); // Keep for backward compatibility
-MaterialConsumptionSchema.index({ material_id: 1 });
 
 const ProductionBatch = mongoose.model('ProductionBatch', ProductionBatchSchema);
 const ProductionStep = mongoose.model('ProductionStep', ProductionStepSchema);
 const ProductionFlow = mongoose.model('ProductionFlow', ProductionFlowSchema);
 const ProductionFlowStep = mongoose.model('ProductionFlowStep', ProductionFlowStepSchema);
-const MaterialConsumption = mongoose.model('MaterialConsumption', MaterialConsumptionSchema);
+// MaterialConsumption is imported from MaterialConsumption.js
 
 export { ProductionBatch, ProductionStep, ProductionFlow, ProductionFlowStep, MaterialConsumption };
 export default ProductionBatch;

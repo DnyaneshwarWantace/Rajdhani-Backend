@@ -44,19 +44,44 @@ const orderItemSchema = new mongoose.Schema({
     required: true,
     min: 1
   },
+  unit: {
+    type: String, // Unit of measurement (kg, piece, roll, sqm, etc.)
+    required: true,
+    trim: true
+  },
   unit_price: {
     type: String,
     required: true
   },
-  total_price: {
+
+  // GST per item
+  gst_rate: {
     type: String,
+    default: "18.00" // Default 18% GST
+  },
+  gst_amount: {
+    type: String,
+    default: "0.00"
+  },
+  gst_included: {
+    type: Boolean,
+    default: true
+  },
+
+  // Pricing
+  subtotal: {
+    type: String, // quantity * unit_price
+    required: true
+  },
+  total_price: {
+    type: String, // subtotal + gst_amount
     required: true
   },
 
   // Additional pricing fields for SQM-based calculations
   pricing_unit: {
     type: String,
-    enum: ['piece', 'sqm', 'meter', 'kg', null],
+    enum: ['piece', 'sqm', 'meter', 'kg', 'roll', 'set', 'gsm', null],
     default: null
   },
   unit_value: {
@@ -183,35 +208,57 @@ orderItemSchema.virtual('is_fully_selected').get(function() {
 orderItemSchema.set('toJSON', { virtuals: true });
 orderItemSchema.set('toObject', { virtuals: true });
 
-// Pre-save middleware - DO NOT recalculate if total_price is already set
+// Pre-save middleware - Calculate subtotal, GST, and total ONLY if not provided by frontend
 orderItemSchema.pre('save', function(next) {
-  console.log('PRE-SAVE HOOK - Before:', {
+  console.log('PRE-SAVE HOOK - Received from frontend:', {
     product: this.product_name,
     quantity: this.quantity,
     unit_price: this.unit_price,
-    total_price_before: this.total_price,
+    subtotal: this.subtotal,
+    gst_rate: this.gst_rate,
+    gst_amount: this.gst_amount,
+    total_price: this.total_price,
     pricing_unit: this.pricing_unit,
     unit_value: this.unit_value
   });
 
-  // IMPORTANT: Only auto-calculate if total_price is missing, empty, or zero
-  // If frontend sends a total_price, we MUST use it (for SQM-based pricing)
-  const totalPriceValue = parseFloat(this.total_price);
-  const shouldCalculate = !this.total_price ||
-                          this.total_price === '' ||
-                          this.total_price === '0' ||
-                          isNaN(totalPriceValue) ||
-                          totalPriceValue === 0;
+  // If subtotal and total_price are already provided by frontend, SKIP calculation
+  // Frontend uses pricing calculator for complex calculations (GSM, SQM, etc.)
+  const hasSubtotal = this.subtotal && parseFloat(this.subtotal) > 0;
+  const hasTotalPrice = this.total_price && parseFloat(this.total_price) > 0;
 
-  console.log('Should calculate?', shouldCalculate, 'totalPriceValue:', totalPriceValue);
-
-  if (shouldCalculate) {
-    const unitPrice = parseFloat(this.unit_price) || 0;
-    this.total_price = (this.quantity * unitPrice).toFixed(2);
-    console.log('CALCULATED total_price:', this.total_price);
-  } else {
-    console.log('KEEPING total_price:', this.total_price);
+  if (hasSubtotal && hasTotalPrice) {
+    console.log('✅ Using frontend calculated values - NO recalculation needed');
+    this.updated_at = new Date();
+    next();
+    return;
   }
+
+  // Only calculate if frontend didn't provide values (fallback for old data or simple items)
+  console.log('⚠️ Frontend did not provide calculated values - calculating now...');
+
+  const quantity = parseFloat(this.quantity) || 0;
+  const unitPrice = parseFloat(this.unit_price) || 0;
+  const subtotal = quantity * unitPrice;
+  this.subtotal = subtotal.toFixed(2);
+
+  const gstRate = parseFloat(this.gst_rate) || 0;
+  let gstAmount = 0;
+
+  if (this.gst_included && gstRate > 0) {
+    gstAmount = (subtotal * gstRate) / 100;
+  }
+
+  this.gst_amount = gstAmount.toFixed(2);
+
+  const totalPrice = subtotal + gstAmount;
+  this.total_price = totalPrice.toFixed(2);
+
+  console.log('BACKEND CALCULATED VALUES:', {
+    subtotal: this.subtotal,
+    gst_amount: this.gst_amount,
+    total_price: this.total_price
+  });
 
   this.updated_at = new Date();
   next();

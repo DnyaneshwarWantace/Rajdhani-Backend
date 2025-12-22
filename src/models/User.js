@@ -11,8 +11,8 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-    lowercase: true,
     trim: true
+    // Note: lowercase removed to preserve email case (capital stays capital, small stays small)
   },
   password: {
     type: String,

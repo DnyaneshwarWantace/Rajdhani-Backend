@@ -2,6 +2,9 @@ import { ProductionBatch, ProductionStep, ProductionFlow, ProductionFlowStep, Ma
 import ProductionMachine from '../models/ProductionMachine.js';
 import ProductionWaste from '../models/ProductionWaste.js';
 import PlanningDraftState from '../models/PlanningDraftState.js';
+import IndividualProduct from '../models/IndividualProduct.js';
+import Product from '../models/Product.js';
+import User from '../models/User.js';
 import { generateId } from '../utils/idGenerator.js';
 import {
   logProductionStart,
@@ -81,13 +84,53 @@ export const getProductions = async (req, res) => {
   }
 };
 
-// Get production (batch) by id
+// Get production (batch) by id with ALL related data
 export const getProductionById = async (req, res) => {
   try {
     const { id } = req.params;
     const batch = await ProductionBatch.findOne({ id });
     if (!batch) return res.status(404).json({ success: false, error: 'Not found' });
-    return res.json({ success: true, data: batch });
+
+    // Fetch all related data for this batch
+    const [materialConsumption, productionFlow, draftState] = await Promise.all([
+      // Get material consumption records
+      MaterialConsumption.find({ production_batch_id: id }),
+      // Get production flow
+      ProductionFlow.findOne({
+        $or: [
+          { production_batch_id: id },
+          { production_product_id: id }
+        ]
+      }),
+      // Get draft state if exists (by batch_id first, then by product_id)
+      PlanningDraftState.findOne({
+        $or: [
+          { production_batch_id: id },
+          { product_id: batch.product_id }
+        ]
+      })
+    ]);
+
+    // Get flow steps if flow exists
+    let flowSteps = [];
+    if (productionFlow) {
+      flowSteps = await ProductionFlowStep.find({ flow_id: productionFlow.id }).sort({ order_index: 1 });
+    }
+
+    // Convert batch to plain object and add all related data
+    const batchData = batch.toObject();
+
+    // Add related collections to batch data
+    batchData.material_consumption = materialConsumption || [];
+    batchData.production_flow = productionFlow ? {
+      ...productionFlow.toObject(),
+      steps: flowSteps
+    } : null;
+    batchData.draft_state = draftState || null;
+
+    console.log(`✅ Fetched batch ${id} with ${materialConsumption?.length || 0} materials, ${flowSteps?.length || 0} flow steps`);
+
+    return res.json({ success: true, data: batchData });
   } catch (error) {
     console.error('getProductionById error:', error);
     return res.status(500).json({ success: false, error: error.message });
@@ -99,9 +142,34 @@ export const updateProduction = async (req, res) => {
   try {
     const { id } = req.params;
     const update = req.body || {};
+    
+    // Handle nested objects (wastage_stage, final_stage) properly using $set
+    const updateQuery = {};
+    
+    // Separate nested objects from flat fields
+    const { wastage_stage, final_stage, ...flatFields } = update;
+    
+    // Add flat fields first
+    Object.assign(updateQuery, flatFields);
+    
+    // Handle nested wastage_stage
+    if (wastage_stage) {
+      Object.keys(wastage_stage).forEach(key => {
+        updateQuery[`wastage_stage.${key}`] = wastage_stage[key];
+      });
+    }
+    
+    // Handle nested final_stage
+    if (final_stage) {
+      Object.keys(final_stage).forEach(key => {
+        updateQuery[`final_stage.${key}`] = final_stage[key];
+      });
+    }
+    
+    // Use $set for proper nested updates
     const updated = await ProductionBatch.findOneAndUpdate(
       { id },
-      { ...update },
+      { $set: updateQuery },
       { new: true }
     );
     if (!updated) return res.status(404).json({ success: false, error: 'Not found' });
@@ -109,6 +177,101 @@ export const updateProduction = async (req, res) => {
     // Log production completion if status changed to completed
     if (update.status === 'completed') {
       await logProductionComplete(req, updated);
+      
+      // Get current user's full name for inspector
+      let inspectorName = 'System';
+      if (req.user && req.user.id) {
+        try {
+          const user = await User.findOne({ id: req.user.id });
+          if (user) {
+            inspectorName = user.full_name || user.email || 'System';
+          }
+        } catch (error) {
+          console.error('Error fetching user for inspector:', error);
+        }
+      }
+      
+      // Update individual products in this batch to 'available' status
+      // BUT: Only update products that were CREATED in this batch, not products that were USED as materials
+      // Set inspector and default location
+      const defaultLocation = 'Warehouse A - General Storage';
+      try {
+        // First, find all individual products that were USED as materials in this batch
+        const MaterialConsumption = (await import('../models/MaterialConsumption.js')).default;
+        const consumedMaterials = await MaterialConsumption.find({
+          production_batch_id: updated.id,
+          material_type: 'product',
+          status: 'active'
+        }).lean();
+        
+        // Get all individual product IDs that were used as materials
+        const usedProductIds = new Set();
+        consumedMaterials.forEach(consumption => {
+          if (consumption.individual_product_ids && Array.isArray(consumption.individual_product_ids)) {
+            consumption.individual_product_ids.forEach(id => usedProductIds.add(id));
+          }
+        });
+        
+        console.log(`📦 Found ${usedProductIds.size} individual products used as materials in batch ${updated.batch_number}`);
+        
+        // Find all individual products that belong to this batch
+        const allBatchProducts = await IndividualProduct.find({
+          batch_number: updated.batch_number
+        });
+        
+        // Separate products: those that were used vs those that were created
+        const usedProducts = allBatchProducts.filter(ip => usedProductIds.has(ip.id));
+        const createdProducts = allBatchProducts.filter(ip => !usedProductIds.has(ip.id));
+        
+        console.log(`📊 Batch ${updated.batch_number}: ${usedProducts.length} used products, ${createdProducts.length} created products`);
+        
+        // Only update CREATED products to 'available' status (not the used ones)
+        if (createdProducts.length > 0) {
+          await IndividualProduct.updateMany(
+            { 
+              batch_number: updated.batch_number,
+              id: { $nin: Array.from(usedProductIds) } // Exclude used products
+            },
+            {
+              $set: {
+                status: 'available',
+                inspector: inspectorName,
+                location: defaultLocation,
+                completion_date: new Date().toISOString().split('T')[0],
+                updated_at: new Date()
+              }
+            }
+          );
+          
+          console.log(`✅ Updated ${createdProducts.length} newly created individual products to 'available' status with inspector: ${inspectorName}`);
+          console.log(`⚠️  Kept ${usedProducts.length} used products with their current status (should be 'used')`);
+        }
+        
+        // Update product stock counts for all products (both used and created)
+        const allProductIds = [...new Set(allBatchProducts.map(ip => ip.product_id))];
+        for (const productId of allProductIds) {
+          const product = await Product.findOne({ id: productId });
+          if (product && product.individual_stock_tracking) {
+            const availableCount = await IndividualProduct.countDocuments({
+              product_id: productId,
+              status: 'available'
+            });
+            await Product.findOneAndUpdate(
+              { id: productId },
+              { 
+                $set: { 
+                  current_stock: availableCount,
+                  individual_products_count: availableCount,
+                  updated_at: new Date()
+                }
+              }
+            );
+          }
+        }
+      } catch (error) {
+        console.error('Error updating individual products on production completion:', error);
+        // Don't fail the request if this fails
+      }
     }
 
     return res.json({ success: true, data: updated });
@@ -227,15 +390,49 @@ export const createProductionWaste = async (req, res) => {
       material_name: data.material_name || null,
       material_type: data.material_type || 'raw_material', // Track if it's a raw material or product
       can_be_reused: data.can_be_reused === true || data.can_be_reused === 'true' || false,
+      individual_product_ids: data.individual_product_ids || [], // Track individual products marked as waste
+      individual_products: data.individual_products || [], // Full individual product details
       status: data.status || 'generated'
     };
     
+    // If this is the first waste record for this batch, mark wastage_stage as 'in_progress'
+    const batchId = data.batch_id || data.production_batch_id;
+    if (batchId) {
+      const existingWaste = await ProductionWaste.findOne({ 
+        production_batch_id: batchId 
+      });
+      
+      if (!existingWaste) {
+        // First waste record - mark wastage stage as in_progress
+        await ProductionBatch.findOneAndUpdate(
+          { id: batchId },
+          { 
+            $set: { 
+              'wastage_stage.status': 'in_progress',
+              'wastage_stage.started_at': new Date(),
+              'wastage_stage.started_by': req.user?.email || req.user?.id || 'System',
+              'wastage_stage.has_wastage': true
+            } 
+          }
+        );
+        console.log(`✅ Marked wastage_stage as 'in_progress' for batch ${batchId}`);
+      }
+    }
+    
     console.log('📝 Creating waste with data:', {
+      production_id: wasteData.production_id,
+      batch_id: wasteData.batch_id,
+      product_id: wasteData.product_id,
+      product_name: wasteData.product_name,
       waste_type: wasteData.waste_type,
       can_be_reused: wasteData.can_be_reused,
       waste_category: wasteData.waste_category,
       material_id: wasteData.material_id,
-      material_name: wasteData.material_name
+      material_name: wasteData.material_name,
+      material_type: wasteData.material_type,
+      individual_product_ids: wasteData.individual_product_ids,
+      quantity: wasteData.quantity,
+      waste_percentage: wasteData.waste_percentage
     });
     
     const waste = new ProductionWaste(wasteData);
@@ -552,6 +749,7 @@ export const createProductionFlowStep = async (req, res) => {
       order_index: order_index,
       machine_id: data.machine_id,
       inspector_name: inspector_name,
+      shift: data.shift || 'day',
       start_time: data.start_time,
       end_time: data.end_time,
       notes: data.notes || data.description
@@ -600,23 +798,23 @@ export const updateProductionFlowStep = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Production flow step not found' });
     }
 
-    // Log step completion if status changed to completed
-    if (update.status === 'completed') {
-      const flow = await ProductionFlow.findOne({ id: updated.flow_id });
-      if (flow) {
-        const batch = await ProductionBatch.findOne({ id: flow.production_product_id || flow.id });
-        if (batch) {
+    // Get flow and batch for logging
+    const flow = await ProductionFlow.findOne({ id: updated.flow_id });
+    if (flow) {
+      const batchId = flow.production_batch_id || flow.production_product_id;
+      const batch = await ProductionBatch.findOne({ id: batchId });
+
+      if (batch) {
+        // NOTE: Stage tracking is handled by ProductionFlow and ProductionFlowStep
+        // No need to update machine_stage in ProductionBatch - it's redundant
+
+        // Log step completion
+        if (update.status === 'completed') {
           await logProductionStepComplete(req, batch, updated.step_name);
         }
-      }
-    }
 
-    // Log machine assignment if machine_id was added
-    if (update.machine_id && !updated.machine_id) {
-      const flow = await ProductionFlow.findOne({ id: updated.flow_id });
-      if (flow) {
-        const batch = await ProductionBatch.findOne({ id: flow.production_product_id || flow.id });
-        if (batch) {
+        // Log machine assignment
+        if (update.machine_id && !updated.machine_id) {
           await logProductionMachineAssign(req, batch, update.machine_id);
         }
       }
@@ -661,15 +859,19 @@ export const getProductionStats = async (req, res) => {
 // Save planning draft state
 export const savePlanningDraftState = async (req, res) => {
   try {
-    const { product_id, form_data, recipe_data, materials, consumed_materials } = req.body;
+    const { product_id, production_batch_id, form_data, recipe_data, materials, consumed_materials } = req.body;
     const user_id = req.user.id;
 
     if (!product_id) {
       return res.status(400).json({ success: false, error: 'product_id is required' });
     }
 
-    // Check if draft state already exists
-    let draftState = await PlanningDraftState.findOne({ product_id, user_id });
+    // Check if draft state already exists (by product_id and user_id, or by production_batch_id if provided)
+    const query = production_batch_id 
+      ? { $or: [{ product_id, user_id }, { production_batch_id }] }
+      : { product_id, user_id };
+    
+    let draftState = await PlanningDraftState.findOne(query);
 
     if (draftState) {
       // Update existing draft state
@@ -677,6 +879,9 @@ export const savePlanningDraftState = async (req, res) => {
       draftState.recipe_data = recipe_data || draftState.recipe_data;
       draftState.materials = materials || draftState.materials;
       draftState.consumed_materials = consumed_materials || draftState.consumed_materials || [];
+      if (production_batch_id) {
+        draftState.production_batch_id = production_batch_id;
+      }
       draftState.updated_at = new Date();
       await draftState.save();
     } else {
@@ -685,6 +890,7 @@ export const savePlanningDraftState = async (req, res) => {
       draftState = new PlanningDraftState({
         id,
         product_id,
+        production_batch_id: production_batch_id || null,
         user_id,
         form_data: form_data || {},
         recipe_data: recipe_data || null,

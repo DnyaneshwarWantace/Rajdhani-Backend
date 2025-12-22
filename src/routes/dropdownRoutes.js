@@ -10,7 +10,9 @@ import {
   updateDropdownOption,
   toggleActiveStatus,
   deleteDropdownOption,
-  getAllCategories
+  getAllCategories,
+  getUnitsByTypeEndpoint,
+  getAllUnitsEndpoint
 } from '../controllers/dropdownController.js';
 import { authenticate, checkPermission, checkPageAccess } from '../middleware/authMiddleware.js';
 
@@ -27,6 +29,12 @@ router.get('/', getAllDropdownOptions);
 
 // Get all unique categories - accessible to all authenticated users
 router.get('/categories', getAllCategories);
+
+// Get all predefined units - accessible to all authenticated users
+router.get('/units', getAllUnitsEndpoint);
+
+// Get units by type - accessible to all authenticated users
+router.get('/units/:type', getUnitsByTypeEndpoint);
 
 // Get multiple categories at once - accessible to all authenticated users
 router.get('/multiple', getMultipleCategories);

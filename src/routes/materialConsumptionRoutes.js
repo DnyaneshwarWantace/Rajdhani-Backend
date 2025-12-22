@@ -8,7 +8,8 @@ import {
   getBatchConsumptionSummary,
   getConsumptionByMaterialType,
   getStepConsumption,
-  getConsumptionAnalytics
+  getConsumptionAnalytics,
+  getRawMaterialConsumptionHistory
 } from '../controllers/materialConsumptionController.js';
 import { authenticate, checkPermission, checkPageAccess } from '../middleware/authMiddleware.js';
 
@@ -30,5 +31,6 @@ router.get('/batch/:batchId/summary', checkPermission('production_view'), getBat
 router.get('/batch/:batchId/type/:materialType', checkPermission('production_view'), getConsumptionByMaterialType);
 router.get('/step/:stepId', checkPermission('production_view'), getStepConsumption);
 router.get('/analytics/summary', checkPermission('production_view'), getConsumptionAnalytics);
+router.get('/raw-material/:materialId/history', checkPermission('production_view'), getRawMaterialConsumptionHistory);
 
 export default router;

@@ -110,6 +110,106 @@ export const createIndividualProducts = async (req, res) => {
   }
 };
 
+// Create a single individual product
+export const createIndividualProduct = async (req, res) => {
+  try {
+    const {
+      product_id,
+      qr_code,
+      serial_number,
+      status = 'available',
+      final_length,
+      final_width,
+      final_weight,
+      quality_grade = 'A',
+      inspector,
+      location = 'Warehouse A - General Storage',
+      notes,
+      production_date,
+      batch_number
+    } = req.body;
+
+    // Validate product exists and has individual tracking enabled
+    const product = await Product.findOne({ id: product_id });
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        error: 'Product not found'
+      });
+    }
+
+    if (!product.individual_stock_tracking) {
+      return res.status(400).json({
+        success: false,
+        error: 'Individual stock tracking is not enabled for this product'
+      });
+    }
+
+    // Generate QR code and serial number if not provided
+    const generatedQRCode = qr_code || await generateQRCode();
+    const generatedSerialNumber = serial_number || `${product.id}_${Date.now()}`;
+
+    // Get inspector name from request body, or use logged-in user's name, or fallback to email
+    const inspectorName = inspector || 
+                          (req.user?.full_name) || 
+                          (req.user?.email) || 
+                          'System';
+
+    // Create individual product
+    const individualProduct = new IndividualProduct({
+      id: await generateIndividualProductId(),
+      product_id: product.id,
+      qr_code: generatedQRCode,
+      serial_number: generatedSerialNumber,
+      product_name: product.name,
+      color: product.color,
+      pattern: product.pattern,
+      length: product.length,
+      width: product.width,
+      weight: product.weight,
+      final_length: final_length || product.length,
+      final_width: final_width || product.width,
+      final_weight: final_weight || product.weight,
+      batch_number: batch_number || `BATCH_${Date.now()}`,
+      quality_grade: quality_grade,
+      inspector: inspectorName,
+      location: location,
+      notes: notes || `Individual product created for ${product.name}`,
+      production_date: production_date || new Date().toISOString().split('T')[0],
+      completion_date: new Date().toISOString().split('T')[0],
+      added_date: new Date().toISOString().split('T')[0],
+      status: status
+    });
+
+    await individualProduct.save();
+
+    // Update product's individual products count and current_stock
+    product.individual_products_count += 1;
+    
+    // Sync current_stock with available individual products
+    const availableCount = await IndividualProduct.countDocuments({
+      product_id: product.id,
+      status: 'available'
+    });
+    product.current_stock = availableCount;
+    await product.save();
+
+    // Log individual product generation
+    await logIndividualProductGenerate(req, product, 1);
+
+    res.status(201).json({
+      success: true,
+      data: individualProduct
+    });
+  } catch (error) {
+    console.error('Error creating individual product:', error);
+    res.status(400).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
 // Get all individual products with optional filtering
 export const getAllIndividualProducts = async (req, res) => {
   try {

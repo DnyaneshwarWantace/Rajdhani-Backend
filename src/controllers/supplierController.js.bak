@@ -1,4 +1,3 @@
-import { buildFuzzySearchQuery, fuzzyFilterAndSort } from "../utils/fuzzySearch.js";
 import Supplier from '../models/Supplier.js';
 import RawMaterial from '../models/RawMaterial.js';
 import PurchaseOrder from '../models/PurchaseOrder.js';
@@ -56,28 +55,20 @@ export const getSuppliers = async (req, res) => {
 
     let query = {};
 
-    let useFuzzySearch = false;
     if (search) {
-      useFuzzySearch = true;
-      const fuzzyQuery = buildFuzzySearchQuery(search, ['name', 'email', 'contact_person'], 0.8);
-      if (fuzzyQuery.$or) {
-        query = { ...query, ...fuzzyQuery };
-      }
+      const escapedSearch = escapeRegex(search);
+      query.$or = [
+        { name: { $regex: escapedSearch, $options: 'i' } },
+        { email: { $regex: escapedSearch, $options: 'i' } },
+        { contact_person: { $regex: escapedSearch, $options: 'i' } }
+      ];
     }
 
     if (status && status !== 'all') {
       query.status = status;
     }
 
-    let suppliers = await Supplier.find(query)
-      .collation({ locale: 'en', strength: 2 })
-      .sort({ name: 1 });
-
-    // Apply fuzzy filtering if search is enabled
-    if (useFuzzySearch && search) {
-      console.log(`🔍 Applying fuzzy filter for suppliers: "${search}"`);
-      suppliers = fuzzyFilterAndSort(suppliers.map(s => s.toObject()), search, ['name', 'email', 'contact_person'], 0.8);
-    }
+    const suppliers = await Supplier.find(query).sort({ name: 1 });
 
     // Calculate actual order stats from purchase orders for each supplier
     const suppliersWithStats = await Promise.all(

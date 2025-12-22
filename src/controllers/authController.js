@@ -42,13 +42,14 @@ const login = async (req, res) => {
       });
     }
 
-    const emailLower = email.toLowerCase().trim();
-    console.log('📧 Looking for user:', emailLower);
+    // Preserve email case - only trim whitespace
+    const emailTrimmed = email.trim();
+    console.log('📧 Looking for user:', emailTrimmed);
 
-    // Check if it's the fake admin (for development)
-    if (emailLower === FAKE_ADMIN.email && password === FAKE_ADMIN.password) {
-      // Find or create fake admin user
-      let fakeAdminUser = await User.findOne({ email: FAKE_ADMIN.email });
+    // Check if it's the fake admin (for development) - compare case-insensitive
+    if (emailTrimmed.toLowerCase() === FAKE_ADMIN.email.toLowerCase() && password === FAKE_ADMIN.password) {
+      // Find or create fake admin user - search case-insensitive
+      let fakeAdminUser = await User.findOne({ email: { $regex: new RegExp(`^${FAKE_ADMIN.email}$`, 'i') } });
 
       if (!fakeAdminUser) {
         const userId = `USR-ADMIN-001`;
@@ -82,8 +83,8 @@ const login = async (req, res) => {
       });
     }
 
-    // Find user by email
-    const user = await User.findOne({ email: emailLower });
+    // Find user by email (case-insensitive search but preserve original case)
+    const user = await User.findOne({ email: { $regex: new RegExp(`^${emailTrimmed}$`, 'i') } });
     console.log('👤 User found:', user ? `${user.email} (${user.role})` : 'NOT FOUND');
 
     if (!user) {
@@ -1160,10 +1161,11 @@ const createUser = async (req, res) => {
       });
     }
 
-    const emailLower = email.toLowerCase().trim();
+    // Preserve email case - only trim whitespace
+    const emailTrimmed = email.trim();
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email: emailLower });
+    // Check if user already exists (case-insensitive search)
+    const existingUser = await User.findOne({ email: { $regex: new RegExp(`^${emailTrimmed}$`, 'i') } });
     if (existingUser) {
       return res.status(400).json({
         success: false,
@@ -1175,23 +1177,29 @@ const createUser = async (req, res) => {
     const tempPassword = Math.random().toString(36).slice(-8);
 
     // Send welcome email FIRST - only create user if email is sent successfully
+    // Use original email case for display, but search is case-insensitive
     const { sendWelcomeEmail } = await import('../utils/emailService.js');
-    const emailResult = await sendWelcomeEmail(emailLower, full_name, tempPassword);
+    const emailResult = await sendWelcomeEmail(emailTrimmed, full_name, tempPassword);
 
-    // Check if email was sent successfully - user should NOT be created if email fails
-    // However, if email was skipped (not configured), still allow user creation (just log it)
-    if (!emailResult.success && !emailResult.skipped) {
-      // If email failed for any reason other than being skipped, return error
-      return res.status(400).json({
-        success: false,
-        error: `Failed to send welcome email: ${emailResult.error}. User was not created. Please check email configuration.`
-      });
-    }
+    console.log('📧 Welcome email result:', emailResult);
 
-    // Only create user if email was sent successfully or skipped (logged)
-    // If email was skipped, log a warning but continue with user creation
-    if (emailResult.skipped) {
-      console.warn(`⚠️ Email service not configured. User will be created without sending welcome email. Email: ${emailLower}`);
+    // STRICT: Only create user if email was sent successfully
+    // If email fails (not skipped), DO NOT create the user
+    if (!emailResult.success) {
+      // If email was skipped (not configured), log warning but still allow creation
+      if (emailResult.skipped) {
+        console.warn(`⚠️ Email service not configured. User will be created without sending welcome email. Email: ${emailTrimmed}`);
+      } else {
+        // Email ACTUALLY failed (SendGrid error, network issue, etc.) - DO NOT create user
+        console.error(`❌ Email sending FAILED for ${emailTrimmed}. User will NOT be created.`);
+        console.error(`   Error: ${emailResult.error}`);
+        return res.status(500).json({
+          success: false,
+          error: `Failed to send welcome email to ${emailTrimmed}. User was NOT created. Error: ${emailResult.error || 'Unknown email sending error'}. Please check your SendGrid configuration and try again.`
+        });
+      }
+    } else {
+      console.log(`✅ Welcome email sent successfully to ${emailTrimmed}. Proceeding to create user.`);
     }
     // Generate user ID
     const userCount = await User.countDocuments();
@@ -1201,9 +1209,10 @@ const createUser = async (req, res) => {
     const role = req.body.role || 'user';
 
     // Create user with created_by set to current admin's ID
+    // Preserve original email case (capital stays capital, small stays small)
     const newUser = new User({
       id: userId,
-      email: emailLower,
+      email: emailTrimmed, // Preserve original case
       password: tempPassword,
       full_name: full_name,
       phone: phone || null,
@@ -1241,24 +1250,37 @@ const createUser = async (req, res) => {
 // Admin: Get all users
 const getAllUsers = async (req, res) => {
   try {
+    console.log('📋 Getting all users...');
     const users = await User.find({})
       .select('-password')
       .sort({ created_at: -1 });
 
+    console.log(`✅ Found ${users.length} users`);
+
     // Get creator information for each user
     const usersWithCreator = await Promise.all(users.map(async (user) => {
-      const userObj = user.toJSON();
-      if (user.created_by && user.created_by !== 'system') {
-        const creator = await User.findOne({ id: user.created_by }).select('full_name email');
-        if (creator) {
-          userObj.created_by_user = {
-            id: creator.id,
-            full_name: creator.full_name,
-            email: creator.email
-          };
+      try {
+        const userObj = user.toJSON();
+        if (user.created_by && user.created_by !== 'system') {
+          try {
+            const creator = await User.findOne({ id: user.created_by }).select('full_name email');
+            if (creator) {
+              userObj.created_by_user = {
+                id: creator.id,
+                full_name: creator.full_name,
+                email: creator.email
+              };
+            }
+          } catch (creatorError) {
+            console.error(`Error fetching creator for user ${user.id}:`, creatorError);
+            // Continue without creator info
+          }
         }
+        return userObj;
+      } catch (userError) {
+        console.error(`Error processing user ${user.id}:`, userError);
+        return user.toJSON(); // Return basic user info if processing fails
       }
-      return userObj;
     }));
 
     res.json({
@@ -1267,9 +1289,10 @@ const getAllUsers = async (req, res) => {
     });
   } catch (error) {
     console.error('Get all users error:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
-      error: 'An error occurred while fetching users.'
+      error: `An error occurred while fetching users: ${error.message}`
     });
   }
 };
@@ -1297,19 +1320,46 @@ const deleteUser = async (req, res) => {
       });
     }
 
-    // Check if current user created this user
-    if (user.created_by !== currentUser.id) {
-      return res.status(403).json({
+    // Get current user's full record to check role
+    const currentUserRecord = await User.findOne({ id: currentUser.id });
+    if (!currentUserRecord) {
+      return res.status(401).json({
         success: false,
-        error: 'You can only delete users that you created'
+        error: 'Current user not found'
       });
     }
 
-    // Prevent deleting admin users - must depromote first
+    // Rule 1: Cannot delete your creator (hierarchical protection)
+    if (user.id === currentUserRecord.created_by) {
+      return res.status(403).json({
+        success: false,
+        error: 'Cannot delete the user who created your account'
+      });
+    }
+
+    // Rule 2: Cannot delete admin users directly - must demote first
     if (user.role === 'admin') {
       return res.status(403).json({
         success: false,
         error: 'Cannot delete admin users. Please change their role to "user" first, then delete them.'
+      });
+    }
+
+    // Rule 3: Admins can delete any non-admin user (even if they didn't create them)
+    if (currentUserRecord.role === 'admin') {
+      // Admin can delete any non-admin user
+      await User.findOneAndDelete({ id });
+      return res.json({
+        success: true,
+        message: 'User deleted successfully'
+      });
+    }
+
+    // Rule 4: Non-admin users can only delete users they created
+    if (user.created_by !== currentUser.id) {
+      return res.status(403).json({
+        success: false,
+        error: 'You can only delete users that you created'
       });
     }
 

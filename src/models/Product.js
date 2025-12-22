@@ -101,6 +101,14 @@ const productSchema = new mongoose.Schema({
     required: true,
     trim: true
     // Validated against dropdown_options in controller
+    // This is the measuring unit (e.g., "sqm" for carpets)
+  },
+  count_unit: {
+    type: String,
+    default: 'rolls',
+    trim: true
+    // This is the counting unit for whole products (e.g., "rolls" for carpets)
+    // While unit is "sqm" for measuring, count_unit is "rolls" for inventory counting
   },
 
   // Stock tracking

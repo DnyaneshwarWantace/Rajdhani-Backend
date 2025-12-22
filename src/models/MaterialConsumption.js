@@ -78,6 +78,18 @@ const materialConsumptionSchema = new mongoose.Schema({
   individual_product_ids: [{
     type: String
   }],
+  individual_products: [{
+    id: String,
+    qr_code: String,
+    serial_number: String,
+    product_name: String,
+    status: String,
+    length: String,
+    width: String,
+    weight: String,
+    color: String,
+    pattern: String
+  }],
   waste_quantity: {
     type: Number,
     default: 0,
@@ -97,6 +109,36 @@ const materialConsumptionSchema = new mongoose.Schema({
     enum: ['active', 'cancelled', 'adjusted'],
     default: 'active'
   },
+  // For raw materials: track consumption status
+  // 'reserved': material reserved for an order (when order is accepted)
+  // 'in_production': material is being used in production, not yet deducted from inventory
+  // 'used': material has been used in production, deducted from inventory
+  // 'sold': material sold/dispatched to customer (when order is dispatched)
+  consumption_status: {
+    type: String,
+    enum: ['reserved', 'in_production', 'used', 'sold'],
+    default: 'in_production'
+  },
+  // Order and customer tracking (for raw materials sold/reserved)
+  order_id: {
+    type: String,
+    required: false,
+    index: true
+  },
+  customer_id: {
+    type: String,
+    required: false
+  },
+  customer_name: {
+    type: String,
+    required: false
+  },
+  reserved_at: {
+    type: Date
+  },
+  sold_at: {
+    type: Date
+  },
   created_at: {
     type: Date,
     default: Date.now
@@ -106,7 +148,8 @@ const materialConsumptionSchema = new mongoose.Schema({
     default: Date.now
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  collection: 'material_consumption'
 });
 
 // Indexes for better query performance
@@ -181,4 +224,10 @@ materialConsumptionSchema.methods.calculateEfficiency = function() {
   return Math.max(0, 100 - wastePercentage);
 };
 
-export default mongoose.models.MaterialConsumption || mongoose.model('MaterialConsumption', materialConsumptionSchema);
+// Clear any cached model to ensure schema changes take effect
+if (mongoose.models.MaterialConsumption) {
+  delete mongoose.models.MaterialConsumption;
+  delete mongoose.connection.models.MaterialConsumption;
+}
+
+export default mongoose.model('MaterialConsumption', materialConsumptionSchema);

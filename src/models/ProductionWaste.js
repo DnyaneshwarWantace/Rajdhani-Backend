@@ -65,6 +65,8 @@ const ProductionWasteSchema = new mongoose.Schema({
   material_name: { type: String },
   material_type: { type: String, enum: ['raw_material', 'product'], default: 'raw_material' }, // Track if it's a raw material or product
   can_be_reused: { type: Boolean, default: false },
+  individual_product_ids: [{ type: String }], // Individual product IDs that are marked as waste (for product type materials)
+  individual_products: [{ type: mongoose.Schema.Types.Mixed }], // Full individual product details (for display)
   added_at: { type: Date }, // Timestamp when waste was returned to inventory
   created_by: { type: String, default: 'system' },
   updated_by: { type: String, default: 'system' }

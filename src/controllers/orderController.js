@@ -11,10 +11,14 @@ import { escapeRegex } from '../utils/regexHelper.js';
 // Create a new order
 export const createOrder = async (req, res) => {
   try {
+    // Get user information from authenticated request
+    const createdBy = req.user?.full_name || req.user?.name || req.user?.email || 'System';
+
     const orderData = {
       ...req.body,
       id: await generateOrderId(),
-      order_number: await generateOrderNumber()
+      order_number: await generateOrderNumber(),
+      created_by: createdBy
     };
 
     // Validate customer exists
@@ -55,31 +59,33 @@ export const createOrder = async (req, res) => {
         console.log('========== ITEM DATA RECEIVED FROM FRONTEND ==========');
         console.log('Product:', itemData.product_name);
         console.log('Quantity:', itemData.quantity);
+        console.log('Unit:', itemData.unit);
         console.log('unit_price from frontend:', itemData.unit_price);
-        console.log('total_price from frontend:', itemData.total_price);
+        console.log('gst_rate from frontend:', itemData.gst_rate);
+        console.log('gst_included from frontend:', itemData.gst_included);
         console.log('pricing_unit from frontend:', itemData.pricing_unit);
         console.log('unit_value from frontend:', itemData.unit_value);
         console.log('product_dimensions from frontend:', itemData.product_dimensions);
         console.log('======================================================');
 
-        // Use the total_price from frontend if provided (already calculated with SQM logic)
-        // Otherwise fall back to quantity * unit_price
-        const totalPrice = itemData.total_price !== undefined
-          ? itemData.total_price
-          : (itemData.quantity * itemData.unit_price);
-
-        console.log('FINAL totalPrice to save:', totalPrice);
-
         const orderItem = new OrderItem({
           id: await generateOrderItemId(),
           order_id: order.id,
           product_id: itemData.product_id || null,
+          raw_material_id: itemData.raw_material_id || null,
           individual_product_id: itemData.individual_product_id || null,
           product_name: itemData.product_name,
           product_type: itemData.product_type || 'product',
           quantity: itemData.quantity,
+          unit: itemData.unit,
           unit_price: itemData.unit_price.toString(),
-          total_price: totalPrice.toString(),
+          // Per-item GST fields
+          gst_rate: itemData.gst_rate ? itemData.gst_rate.toString() : "18.00",
+          gst_included: itemData.gst_included !== undefined ? itemData.gst_included : true,
+          // Pre-save middleware will calculate subtotal, gst_amount, and total_price
+          subtotal: "0.00", // Will be calculated
+          gst_amount: "0.00", // Will be calculated
+          total_price: "0.00", // Will be calculated
           quality_grade: itemData.quality_grade || 'A',
           specifications: itemData.specifications || null,
           selected_individual_products: itemData.selected_individual_products || [],
@@ -89,6 +95,32 @@ export const createOrder = async (req, res) => {
           product_dimensions: itemData.product_dimensions || null
         });
         await orderItem.save();
+
+        // Reserve individual products if selected
+        if (itemData.selected_individual_products && itemData.selected_individual_products.length > 0) {
+          const individualProductIds = itemData.selected_individual_products.map(ip => ip.individual_product_id);
+          await IndividualProduct.updateMany(
+            { id: { $in: individualProductIds } },
+            {
+              status: 'reserved',
+              order_id: order.id
+            }
+          );
+          console.log(`✅ Reserved ${individualProductIds.length} individual products for order ${order.id}`);
+        }
+
+        // Reserve raw material stock if product_type is 'raw_material'
+        if (itemData.product_type === 'raw_material' && itemData.raw_material_id) {
+          const rawMaterial = await RawMaterial.findOne({ id: itemData.raw_material_id });
+          if (rawMaterial) {
+            const reservedStock = (rawMaterial.reserved_stock || 0) + itemData.quantity;
+            await RawMaterial.findOneAndUpdate(
+              { id: itemData.raw_material_id },
+              { reserved_stock: reservedStock }
+            );
+            console.log(`✅ Reserved ${itemData.quantity} ${itemData.unit} of ${rawMaterial.name} for order ${order.id}`);
+          }
+        }
       }
 
       // Recalculate order totals after creating items
@@ -239,11 +271,53 @@ export const getOrderById = async (req, res) => {
     // Get order items
     const orderItems = await OrderItem.find({ order_id: order.id });
 
+    // Enhance items with full product/material details
+    const enhancedItems = await Promise.all(orderItems.map(async (item) => {
+      let productDetails = null;
+
+      // Fetch product or raw material details
+      if (item.product_type === 'raw_material' && item.raw_material_id) {
+        const material = await RawMaterial.findOne({ id: item.raw_material_id });
+        if (material) {
+          productDetails = {
+            color: material.color,
+            category: material.category,
+            subcategory: material.subcategory,
+            weight: material.weight,
+            width: material.width,
+            length: material.length,
+            supplier: material.supplier
+          };
+        }
+      } else if (item.product_id) {
+        const product = await Product.findOne({ id: item.product_id });
+        if (product) {
+          productDetails = {
+            color: product.color,
+            pattern: product.pattern,
+            category: product.category,
+            subcategory: product.subcategory,
+            weight: product.weight,
+            width: product.width,
+            length: product.length,
+            sqm_per_piece: product.sqm_per_piece,
+            width_unit: product.width_unit,
+            length_unit: product.length_unit
+          };
+        }
+      }
+
+      return {
+        ...item.toObject(),
+        product_details: productDetails
+      };
+    }));
+
     res.json({
       success: true,
       data: {
         order,
-        items: orderItems
+        items: enhancedItems
       }
     });
   } catch (error) {
@@ -369,6 +443,11 @@ export const updateOrderStatus = async (req, res) => {
         order.delivered_at = now;
         // Also trigger stock deduction if not already done
         await markIndividualProductsAsSold(order.id);
+        break;
+      case 'cancelled':
+        // Release all reserved stock when order is cancelled
+        console.log(`🚫 Order ${order.id} cancelled, releasing reserved stock`);
+        await releaseReservedStock(order.id);
         break;
     }
 
@@ -817,6 +896,9 @@ export const deleteOrder = async (req, res) => {
       });
     }
 
+    // Release reserved individual products and raw materials before deleting
+    await releaseReservedStock(order.id);
+
     // Delete order items first
     await OrderItem.deleteMany({ order_id: order.id });
 
@@ -836,6 +918,45 @@ export const deleteOrder = async (req, res) => {
       success: false,
       error: error.message
     });
+  }
+};
+
+// Helper function to release reserved stock
+const releaseReservedStock = async (orderId) => {
+  try {
+    console.log(`🔓 Releasing reserved stock for order: ${orderId}`);
+    const orderItems = await OrderItem.find({ order_id: orderId });
+
+    for (const item of orderItems) {
+      // Release individual products
+      if (item.selected_individual_products && item.selected_individual_products.length > 0) {
+        const individualProductIds = item.selected_individual_products.map(ip => ip.individual_product_id);
+        await IndividualProduct.updateMany(
+          { id: { $in: individualProductIds }, status: 'reserved', order_id: orderId },
+          {
+            status: 'available',
+            $unset: { order_id: "" }
+          }
+        );
+        console.log(`✅ Released ${individualProductIds.length} individual products`);
+      }
+
+      // Release raw material stock
+      if (item.product_type === 'raw_material' && item.raw_material_id) {
+        const rawMaterial = await RawMaterial.findOne({ id: item.raw_material_id });
+        if (rawMaterial) {
+          const newReservedStock = Math.max(0, (rawMaterial.reserved_stock || 0) - item.quantity);
+          await RawMaterial.findOneAndUpdate(
+            { id: item.raw_material_id },
+            { reserved_stock: newReservedStock }
+          );
+          console.log(`✅ Released ${item.quantity} ${item.unit} of ${rawMaterial.name}`);
+        }
+      }
+    }
+    console.log(`🎉 Stock release completed for order: ${orderId}`);
+  } catch (error) {
+    console.error('❌ Error releasing reserved stock:', error);
   }
 };
 

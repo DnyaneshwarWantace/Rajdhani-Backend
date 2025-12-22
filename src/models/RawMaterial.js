@@ -26,6 +26,11 @@ const rawMaterialSchema = new mongoose.Schema({
     default: 0,
     min: 0
   },
+  reserved_stock: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
   unit: {
     type: String,
     required: true,

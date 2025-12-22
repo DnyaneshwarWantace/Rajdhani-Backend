@@ -1,9 +1,11 @@
 import RawMaterial from '../models/RawMaterial.js';
 import StockMovement from '../models/StockMovement.js';
 import DropdownOption from '../models/DropdownOption.js';
+import MaterialConsumption from '../models/MaterialConsumption.js';
 import { generateRawMaterialId, generateId } from '../utils/idGenerator.js';
 import { logMaterialCreate, logMaterialUpdate, logMaterialStockUpdate, logMaterialDelete } from '../utils/detailedLogger.js';
 import { escapeRegex } from '../utils/regexHelper.js';
+import { buildFuzzySearchQuery, fuzzyFilterAndSort } from '../utils/fuzzySearch.js';
 
 // Calculate material status
 const calculateMaterialStatus = (currentStock, minThreshold, maxCapacity) => {
@@ -105,16 +107,16 @@ export const getRawMaterials = async (req, res) => {
     } = req.query;
 
     let query = {};
+    let useFuzzySearch = false;
 
-    // Apply search filter
+    // Apply search filter with fuzzy matching
     if (search) {
-      // Escape special regex characters to prevent regex syntax errors
-      const escapedSearch = escapeRegex(search);
-      query.$or = [
-        { name: { $regex: escapedSearch, $options: 'i' } },
-        { type: { $regex: escapedSearch, $options: 'i' } },
-        { category: { $regex: escapedSearch, $options: 'i' } }
-      ];
+      useFuzzySearch = true;
+      // Build fuzzy search query for MongoDB with 80% similarity threshold
+      const fuzzyQuery = buildFuzzySearchQuery(search, ['name', 'type', 'category'], 0.8);
+      if (fuzzyQuery.$or) {
+        query = { ...query, ...fuzzyQuery };
+      }
     }
 
     // Helper to support both single value and multi-select arrays
@@ -161,11 +163,81 @@ export const getRawMaterials = async (req, res) => {
 
     // Use lean() for faster queries (returns plain JS objects instead of Mongoose documents)
     // Fixed: Removed corrupted material with 4.5MB base64 image
-    const materials = await RawMaterial.find(query)
-      .sort({ created_at: -1 })
+    // Sort alphabetically by name (case-insensitive)
+    let materials = await RawMaterial.find(query)
+      .collation({ locale: 'en', strength: 2 })
+      .sort({ name: 1 })
       .limit(parseInt(limit))
       .skip(parseInt(offset))
       .lean();
+
+    // If fuzzy search is enabled, post-process results for better relevance
+    if (useFuzzySearch && search) {
+      console.log(`🔍 Applying fuzzy filter and sort for search term: "${search}"`);
+      materials = fuzzyFilterAndSort(materials, search, ['name', 'type', 'category'], 0.8);
+    }
+
+    // Get consumption breakdown for each material
+    const materialIds = materials.map(m => m.id);
+    if (materialIds.length > 0) {
+      const consumptionData = await MaterialConsumption.aggregate([
+        {
+          $match: {
+            material_id: { $in: materialIds },
+            material_type: 'raw_material',
+            status: 'active'
+          }
+        },
+        {
+          $group: {
+            _id: {
+              material_id: '$material_id',
+              status: '$consumption_status'
+            },
+            total: { $sum: '$quantity_used' }
+          }
+        }
+      ]);
+
+      // Create a map of material_id -> consumption breakdown
+      const consumptionMap = new Map();
+      consumptionData.forEach(item => {
+        const materialId = item._id.material_id;
+        const status = item._id.status || 'in_production';
+        if (!consumptionMap.has(materialId)) {
+          consumptionMap.set(materialId, {
+            in_production: 0,
+            reserved: 0,
+            used: 0,
+            sold: 0
+          });
+        }
+        const breakdown = consumptionMap.get(materialId);
+        breakdown[status] = (breakdown[status] || 0) + item.total;
+      });
+
+      // Add consumption breakdown to each material
+      materials = materials.map(material => {
+        const breakdown = consumptionMap.get(material.id) || {
+          in_production: 0,
+          reserved: 0,
+          used: 0,
+          sold: 0
+        };
+        
+        // Calculate available stock (current_stock - in_production - reserved)
+        const availableStock = Math.max(0, material.current_stock - breakdown.in_production - breakdown.reserved);
+        
+        return {
+          ...material,
+          available_stock: availableStock,
+          in_production: breakdown.in_production,
+          reserved: breakdown.reserved,
+          sold: breakdown.sold,
+          used: breakdown.used
+        };
+      });
+    }
 
     const count = await RawMaterial.countDocuments(query);
 

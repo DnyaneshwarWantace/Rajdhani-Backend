@@ -156,12 +156,13 @@ export const getProducts = async (req, res) => {
 
     let query = {};
 
-    // Apply filters
+    // Apply simple search filter
     if (search) {
       const escapedSearch = escapeRegex(search);
       query.$or = [
         { name: { $regex: escapedSearch, $options: 'i' } },
         { category: { $regex: escapedSearch, $options: 'i' } },
+        { subcategory: { $regex: escapedSearch, $options: 'i' } },
         { color: { $regex: escapedSearch, $options: 'i' } },
         { pattern: { $regex: escapedSearch, $options: 'i' } }
       ];
@@ -272,15 +273,19 @@ export const getProducts = async (req, res) => {
       query.individual_stock_tracking = individual_stock_tracking === 'true';
     }
 
-    const products = await Product.find(query)
-      .sort({ created_at: -1 })
+    let products = await Product.find(query)
+      .collation({ locale: 'en', strength: 2 })
+      .sort({ name: 1 })
       .limit(parseInt(limit))
       .skip(parseInt(offset));
+
+    // Convert to plain objects
+    let productsArray = products.map(p => p.toObject());
 
     const count = await Product.countDocuments(query);
 
     // Get individual product counts for products with individual_stock_tracking
-    const productsWithIndividualTracking = products.filter(p => p.individual_stock_tracking);
+    const productsWithIndividualTracking = productsArray.filter(p => p.individual_stock_tracking);
     
     if (productsWithIndividualTracking.length > 0) {
       const productIds = productsWithIndividualTracking.map(p => p.id);
@@ -325,16 +330,22 @@ export const getProducts = async (req, res) => {
         counts.total += stat.count;
       });
 
-      // Attach individual product stats to products
-      const productsWithStats = products.map(product => {
+      // Attach individual product stats to products and ensure unit fields are included
+      const productsWithStats = productsArray.map(product => {
+        const productWithStats = {
+          ...product,
+          // Ensure unit fields are always included (even if undefined in DB)
+          length_unit: product.length_unit || '',
+          width_unit: product.width_unit || '',
+          weight_unit: product.weight_unit || '',
+        };
+        
         if (product.individual_stock_tracking && statsMap.has(product.id)) {
           const stats = statsMap.get(product.id);
-          return {
-            ...product.toObject(),
-            individual_product_stats: stats
-          };
+          productWithStats.individual_product_stats = stats;
         }
-        return product.toObject();
+        
+        return productWithStats;
       });
 
       console.timeEnd('⏱️ Get Products Query');
@@ -347,10 +358,10 @@ export const getProducts = async (req, res) => {
     } else {
       // No products with individual tracking, return as is
       console.timeEnd('⏱️ Get Products Query');
-      console.log(`✅ Returned ${products.length} products (total: ${count})`);
+      console.log(`✅ Returned ${productsArray.length} products (total: ${count})`);
       res.json({
         success: true,
-        data: products.map(p => p.toObject()),
+        data: productsArray,
         count
       });
     }

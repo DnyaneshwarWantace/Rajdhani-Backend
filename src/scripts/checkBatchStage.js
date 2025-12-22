@@ -41,6 +41,19 @@ async function checkBatchStage(batchNumber) {
     console.log(`Actual Quantity: ${batch.actual_quantity || 0}`);
     console.log(`Created: ${batch.created_at}`);
     console.log(`Updated: ${batch.updated_at}`);
+    
+    // Show wastage_stage information
+    if (batch.wastage_stage) {
+      console.log('\n🗑️  WASTAGE STAGE (from batch):');
+      console.log(`   Status: ${batch.wastage_stage.status || 'not_set'}`);
+      console.log(`   Started At: ${batch.wastage_stage.started_at || 'N/A'}`);
+      console.log(`   Started By: ${batch.wastage_stage.started_by || 'N/A'}`);
+      console.log(`   Completed At: ${batch.wastage_stage.completed_at || 'N/A'}`);
+      console.log(`   Completed By: ${batch.wastage_stage.completed_by || 'N/A'}`);
+      console.log(`   Has Wastage: ${batch.wastage_stage.has_wastage || false}`);
+    } else {
+      console.log('\n🗑️  WASTAGE STAGE: Not set in batch document');
+    }
     console.log('');
 
     // Check PlanningDraftState

@@ -341,7 +341,16 @@ export const logProductionComplete = async (req, production) => {
 
 // Order-specific loggers
 export const logOrderCreate = async (req, order) => {
-  const description = `Created order ${order.order_number} for customer ${order.customer_name} with ${order.items?.length || 0} items`;
+  // Fetch order items for detailed logging
+  const OrderItem = (await import('../models/OrderItem.js')).default;
+  const items = await OrderItem.find({ order_id: order.id });
+
+  // Build product details string
+  const productDetails = items.map(item =>
+    `${item.product_name} (Qty: ${item.quantity} ${item.unit || 'units'}, Price: ₹${item.total_price})`
+  ).join(', ');
+
+  const description = `Created order ${order.order_number} for customer ${order.customer_name} | Products: ${productDetails} | Total: ₹${order.total_amount} | Paid: ₹${order.paid_amount} | Outstanding: ₹${order.outstanding_amount}`;
 
   return logActivity(req, {
     action: 'ORDER_CREATE',
@@ -350,10 +359,36 @@ export const logOrderCreate = async (req, order) => {
     resourceId: order.order_number,
     resourceType: 'Order',
     metadata: {
+      order_id: order.id,
       order_number: order.order_number,
+      customer_id: order.customer_id,
       customer_name: order.customer_name,
-      item_count: order.items?.length || 0,
-      total_amount: order.total_amount
+      customer_email: order.customer_email,
+      customer_phone: order.customer_phone,
+      item_count: items.length,
+      items: items.map(item => ({
+        product_id: item.product_id,
+        product_name: item.product_name,
+        product_type: item.product_type,
+        quantity: item.quantity,
+        unit: item.unit,
+        unit_price: item.unit_price,
+        gst_rate: item.gst_rate,
+        gst_amount: item.gst_amount,
+        total_price: item.total_price,
+        pricing_unit: item.pricing_unit
+      })),
+      subtotal: order.subtotal,
+      gst_amount: order.gst_amount,
+      total_amount: order.total_amount,
+      paid_amount: order.paid_amount,
+      outstanding_amount: order.outstanding_amount,
+      expected_delivery: order.expected_delivery,
+      delivery_address: order.delivery_address,
+      special_instructions: order.special_instructions,
+      priority: order.priority,
+      status: order.status,
+      created_by: order.created_by
     }
   });
 };

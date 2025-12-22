@@ -1,4 +1,3 @@
-import { buildFuzzySearchQuery, fuzzyFilterAndSort } from "../utils/fuzzySearch.js";
 import Customer from '../models/Customer.js';
 import Order from '../models/Order.js';
 import { generateCustomerId } from '../utils/idGenerator.js';
@@ -63,13 +62,14 @@ export const getCustomers = async (req, res) => {
     let query = {};
 
     // Apply filters
-    let useFuzzySearch = false;
     if (search) {
-      useFuzzySearch = true;
-      const fuzzyQuery = buildFuzzySearchQuery(search, ['name', 'email', 'phone', 'company_name'], 0.8);
-      if (fuzzyQuery.$or) {
-        query = { ...query, ...fuzzyQuery };
-      }
+      const escapedSearch = escapeRegex(search);
+      query.$or = [
+        { name: { $regex: escapedSearch, $options: 'i' } },
+        { email: { $regex: escapedSearch, $options: 'i' } },
+        { phone: { $regex: escapedSearch, $options: 'i' } },
+        { company_name: { $regex: escapedSearch, $options: 'i' } }
+      ];
     }
 
     if (customer_type && customer_type !== 'all') {
@@ -80,17 +80,10 @@ export const getCustomers = async (req, res) => {
       query.status = status;
     }
 
-    let customers = await Customer.find(query)
-      .collation({ locale: 'en', strength: 2 })
-      .sort({ name: 1 })
+    const customers = await Customer.find(query)
+      .sort({ created_at: -1 })
       .limit(parseInt(limit))
       .skip(parseInt(offset));
-
-    // Apply fuzzy filtering if search is enabled
-    if (useFuzzySearch && search) {
-      console.log(`🔍 Applying fuzzy filter for customers: "${search}"`);
-      customers = fuzzyFilterAndSort(customers.map(c => c.toObject()), search, ['name', 'email', 'phone', 'company_name'], 0.8);
-    }
 
     const count = await Customer.countDocuments(query);
 

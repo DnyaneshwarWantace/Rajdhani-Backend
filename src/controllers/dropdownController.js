@@ -1,6 +1,17 @@
 import DropdownOption from '../models/DropdownOption.js';
 import { generateId } from '../utils/idGenerator.js';
 import { logDropdownCreate, logDropdownUpdate, logDropdownDelete } from '../utils/detailedLogger.js';
+import {
+  getUnitsByType,
+  getUnitsByCategory,
+  ALL_UNITS,
+  WEIGHT_UNITS,
+  LENGTH_UNITS,
+  WIDTH_UNITS,
+  AREA_UNITS,
+  COUNT_UNITS,
+  VOLUME_UNITS
+} from '../utils/unitCategories.js';
 
 // Get all dropdown options
 export const getAllDropdownOptions = async (req, res) => {
@@ -223,6 +234,217 @@ export const getProductionDropdownData = async (req, res) => {
   }
 };
 
+// Valid length/width units mapping (normalized to standard values)
+const VALID_LENGTH_UNITS = {
+  // Feet variations
+  'feet': 'feet',
+  'foot': 'feet',
+  'ft': 'feet',
+  'Feet': 'feet',
+  'Foot': 'feet',
+  'FT': 'feet',
+  
+  // Meter variations
+  'meter': 'm',
+  'meters': 'm',
+  'metre': 'm',
+  'metres': 'm',
+  'm': 'm',
+  'M': 'm',
+  'Meter': 'm',
+  'Meters': 'm',
+  'Metre': 'm',
+  'Metres': 'm',
+  
+  // Centimeter variations
+  'centimeter': 'cm',
+  'centimeters': 'cm',
+  'centimetre': 'cm',
+  'centimetres': 'cm',
+  'cm': 'cm',
+  'CM': 'cm',
+  'Centimeter': 'cm',
+  'Centimeters': 'cm',
+  'Centimetre': 'cm',
+  'Centimetres': 'cm',
+  
+  // Millimeter variations
+  'millimeter': 'mm',
+  'millimeters': 'mm',
+  'millimetre': 'mm',
+  'millimetres': 'mm',
+  'mm': 'mm',
+  'MM': 'mm',
+  'Millimeter': 'mm',
+  'Millimeters': 'mm',
+  'Millimetre': 'mm',
+  'Millimetres': 'mm',
+  
+  // Inch variations
+  'inch': 'inch',
+  'inches': 'inch',
+  'in': 'inch',
+  'Inch': 'inch',
+  'Inches': 'inch',
+  'IN': 'inch',
+  'INCH': 'inch',
+  
+  // Yard variations
+  'yard': 'yard',
+  'yards': 'yard',
+  'yd': 'yard',
+  'Yard': 'yard',
+  'Yards': 'yard',
+  'YD': 'yard',
+  
+  // Kilometer variations
+  'kilometer': 'km',
+  'kilometers': 'km',
+  'kilometre': 'km',
+  'kilometres': 'km',
+  'km': 'km',
+  'KM': 'km',
+  'Kilometer': 'km',
+  'Kilometers': 'km',
+  'Kilometre': 'km',
+  'Kilometres': 'km',
+};
+
+// Valid weight units mapping (normalized to standard values)
+const VALID_WEIGHT_UNITS = {
+  // GSM variations
+  'gsm': 'GSM',
+  'GSM': 'GSM',
+  'Gsm': 'GSM',
+  'g/sm': 'GSM',
+  'g/m²': 'GSM',
+  'g/m2': 'GSM',
+  'grams per square meter': 'GSM',
+  'grams per square metre': 'GSM',
+  
+  // Kilogram variations
+  'kilogram': 'kg',
+  'kilograms': 'kg',
+  'kilogramme': 'kg',
+  'kilogrammes': 'kg',
+  'kg': 'kg',
+  'KG': 'kg',
+  'Kg': 'kg',
+  'kilo': 'kg',
+  'Kilo': 'kg',
+  'KILO': 'kg',
+  
+  // Gram variations
+  'gram': 'g',
+  'grams': 'g',
+  'gramme': 'g',
+  'grammes': 'g',
+  'g': 'g',
+  'G': 'g',
+  'Gram': 'g',
+  'Grams': 'g',
+  'Gramme': 'g',
+  'Grammes': 'g',
+  
+  // Pound variations
+  'pound': 'lbs',
+  'pounds': 'lbs',
+  'lb': 'lbs',
+  'lbs': 'lbs',
+  'LBS': 'lbs',
+  'Lb': 'lbs',
+  'Lbs': 'lbs',
+  'LB': 'lbs',
+  'Pound': 'lbs',
+  'Pounds': 'lbs',
+  
+  // Ounce variations
+  'ounce': 'oz',
+  'ounces': 'oz',
+  'oz': 'oz',
+  'OZ': 'oz',
+  'Oz': 'oz',
+  'Ounce': 'oz',
+  'Ounces': 'oz',
+  
+  // Ton variations
+  'ton': 'ton',
+  'tons': 'ton',
+  'tonne': 'ton',
+  'tonnes': 'ton',
+  'Ton': 'ton',
+  'Tons': 'ton',
+  'Tonne': 'ton',
+  'Tonnes': 'ton',
+  'TON': 'ton',
+  'TONNE': 'ton',
+  
+  // Milligram variations
+  'milligram': 'mg',
+  'milligrams': 'mg',
+  'milligramme': 'mg',
+  'milligrammes': 'mg',
+  'mg': 'mg',
+  'MG': 'mg',
+  'Mg': 'mg',
+  'Milligram': 'mg',
+  'Milligrams': 'mg',
+};
+
+// Validate and normalize length/width unit
+const validateLengthWidthUnit = (value, category) => {
+  // Only validate for length_unit, width_unit, length_units, width_units categories
+  const lengthWidthCategories = ['length_unit', 'width_unit', 'length_units', 'width_units'];
+  
+  if (!lengthWidthCategories.includes(category)) {
+    return { valid: true, normalized: value.trim() };
+  }
+  
+  const trimmedValue = value.trim().toLowerCase();
+  
+  // Check if the value matches any valid unit (case-insensitive)
+  if (VALID_LENGTH_UNITS[trimmedValue]) {
+    return { 
+      valid: true, 
+      normalized: VALID_LENGTH_UNITS[trimmedValue] 
+    };
+  }
+  
+  // If not found, return error with list of valid units
+  const validUnits = [...new Set(Object.values(VALID_LENGTH_UNITS))].sort();
+  return {
+    valid: false,
+    error: `Invalid ${category.replace('_', ' ')}. Valid units are: ${validUnits.join(', ')}. You entered: "${value}". Common variations like "meter"/"m", "centimeter"/"cm" are accepted.`
+  };
+};
+
+// Validate and normalize weight unit
+const validateWeightUnit = (value, category) => {
+  // Only validate for weight_unit, weight_units categories
+  const weightCategories = ['weight_unit', 'weight_units'];
+  
+  if (!weightCategories.includes(category)) {
+    return { valid: true, normalized: value.trim() };
+  }
+  
+  const trimmedValue = value.trim().toLowerCase();
+  
+  // Check if the value matches any valid unit (case-insensitive)
+  if (VALID_WEIGHT_UNITS[trimmedValue]) {
+    return { 
+      valid: true, 
+      normalized: VALID_WEIGHT_UNITS[trimmedValue] 
+    };
+  }
+  
+  // If not found, return error with list of valid units
+  const validUnits = [...new Set(Object.values(VALID_WEIGHT_UNITS))].sort();
+  return {
+    valid: false,
+    error: `Invalid ${category.replace('_', ' ')}. Valid units are: ${validUnits.join(', ')}. You entered: "${value}". Common variations like "kilogram"/"kg", "gram"/"g", "GSM" are accepted.`
+  };
+};
+
 // Create new dropdown option
 export const createDropdownOption = async (req, res) => {
   try {
@@ -235,19 +457,38 @@ export const createDropdownOption = async (req, res) => {
       });
     }
 
-    // Check if option already exists
-    const existing = await DropdownOption.findOne({ category, value: value.trim() });
+    // Validate length/width units
+    let unitValidation = validateLengthWidthUnit(value, category);
+    if (!unitValidation.valid) {
+      // If not a length/width unit, check if it's a weight unit
+      unitValidation = validateWeightUnit(value, category);
+      if (!unitValidation.valid) {
+        return res.status(400).json({
+          success: false,
+          error: unitValidation.error
+        });
+      }
+    }
+
+    // Use normalized value for units
+    const finalValue = unitValidation.normalized || value.trim();
+
+    // Check if option already exists (using normalized value for length/width)
+    const existing = await DropdownOption.findOne({ 
+      category, 
+      value: finalValue 
+    });
     if (existing) {
       return res.status(400).json({
         success: false,
-        error: 'This option already exists in the category'
+        error: `This option already exists in the category. ${unitValidation.normalized && unitValidation.normalized !== value.trim() ? `Note: "${value}" was normalized to "${unitValidation.normalized}".` : ''}`
       });
     }
 
     const dropdownOption = new DropdownOption({
       id: await generateId('OPT'),
       category,
-      value: value.trim(),
+      value: finalValue,
       display_order: display_order || 999,
       is_active: true
     });
@@ -259,7 +500,10 @@ export const createDropdownOption = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      data: dropdownOption
+      data: dropdownOption,
+      message: unitValidation.normalized && unitValidation.normalized !== value.trim() 
+        ? `Unit "${value}" was normalized to "${unitValidation.normalized}"` 
+        : undefined
     });
   } catch (error) {
     console.error('Error creating dropdown option:', error);
@@ -305,17 +549,38 @@ export const updateDropdownOption = async (req, res) => {
       const checkCategory = updates.category || option.category;
       const checkValue = updates.value || option.value;
 
+      // Validate length/width/weight units if updating value or category
+      let unitValidation = validateLengthWidthUnit(checkValue, checkCategory);
+      if (!unitValidation.valid) {
+        // If not a length/width unit, check if it's a weight unit
+        unitValidation = validateWeightUnit(checkValue, checkCategory);
+        if (!unitValidation.valid) {
+          return res.status(400).json({
+            success: false,
+            error: unitValidation.error
+          });
+        }
+      }
+
+      // Use normalized value for units
+      const finalValue = unitValidation.normalized || checkValue.trim();
+
       const existing = await DropdownOption.findOne({
         category: checkCategory,
-        value: checkValue.trim(),
+        value: finalValue,
         id: { $ne: id }
       });
 
       if (existing) {
         return res.status(400).json({
           success: false,
-          error: 'This option already exists in the category'
+          error: `This option already exists in the category. ${unitValidation.normalized && unitValidation.normalized !== checkValue.trim() ? `Note: "${checkValue}" was normalized to "${unitValidation.normalized}".` : ''}`
         });
+      }
+
+      // Update the value to normalized version if it's a length/width unit
+      if (updates.value && unitValidation.normalized && unitValidation.normalized !== checkValue.trim()) {
+        updates.value = unitValidation.normalized;
       }
     }
 
@@ -466,6 +731,59 @@ export const getAllCategories = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching categories:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+// Get predefined units by type
+export const getUnitsByTypeEndpoint = async (req, res) => {
+  try {
+    const { type } = req.params;
+
+    const validTypes = ['weight', 'length', 'width', 'area', 'count', 'volume'];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid unit type. Must be one of: ${validTypes.join(', ')}`
+      });
+    }
+
+    const units = getUnitsByType(type);
+
+    res.json({
+      success: true,
+      data: units,
+      type
+    });
+  } catch (error) {
+    console.error('Error fetching units by type:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+// Get all predefined units
+export const getAllUnitsEndpoint = async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      data: {
+        all: ALL_UNITS,
+        weight: WEIGHT_UNITS,
+        length: LENGTH_UNITS,
+        width: WIDTH_UNITS,
+        area: AREA_UNITS,
+        count: COUNT_UNITS,
+        volume: VOLUME_UNITS
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching all units:', error);
     res.status(500).json({
       success: false,
       error: error.message

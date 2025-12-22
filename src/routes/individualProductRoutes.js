@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   createIndividualProducts,
+  createIndividualProduct,
   getIndividualProductsByProduct,
   getAllIndividualProducts,
   getIndividualProductById,
@@ -23,6 +24,7 @@ router.use(authenticate);
 router.use(checkPageAccess('products'));
 
 // Individual product routes with action permissions
+router.post('/', checkPermission('individual_product_create'), createIndividualProduct);
 router.post('/bulk', checkPermission('individual_product_create'), createIndividualProducts);
 router.get('/', checkPermission('individual_product_view'), getAllIndividualProducts);
 router.get('/product/:product_id', checkPermission('individual_product_view'), getIndividualProductsByProduct);

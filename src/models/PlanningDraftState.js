@@ -11,6 +11,11 @@ const PlanningDraftStateSchema = new mongoose.Schema({
     required: true,
     index: true
   },
+  production_batch_id: {
+    type: String,
+    required: false,
+    index: true
+  },
   user_id: {
     type: String,
     required: true,
@@ -94,6 +99,7 @@ const PlanningDraftStateSchema = new mongoose.Schema({
 
 // Index for faster lookups
 PlanningDraftStateSchema.index({ product_id: 1, user_id: 1 });
+PlanningDraftStateSchema.index({ production_batch_id: 1 });
 
 const PlanningDraftState = mongoose.model('PlanningDraftState', PlanningDraftStateSchema);
 
