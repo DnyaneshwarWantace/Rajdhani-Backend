@@ -282,6 +282,54 @@ export const getProducts = async (req, res) => {
     // Convert to plain objects
     let productsArray = products.map(p => p.toObject());
 
+    // If search is active, prioritize results by match type
+    // Priority: name matches first, then category, then subcategory, then color/pattern
+    if (search) {
+      const searchLower = search.toLowerCase();
+
+      productsArray = productsArray.sort((a, b) => {
+        const aName = (a.name || '').toLowerCase();
+        const bName = (b.name || '').toLowerCase();
+        const aCategory = (a.category || '').toLowerCase();
+        const bCategory = (b.category || '').toLowerCase();
+        const aSubcategory = (a.subcategory || '').toLowerCase();
+        const bSubcategory = (b.subcategory || '').toLowerCase();
+
+        // Check if name starts with search term (highest priority)
+        const aNameStarts = aName.startsWith(searchLower);
+        const bNameStarts = bName.startsWith(searchLower);
+
+        // Check if name contains search term
+        const aNameMatch = aName.includes(searchLower);
+        const bNameMatch = bName.includes(searchLower);
+
+        // Check category/subcategory matches
+        const aCategoryMatch = aCategory.includes(searchLower);
+        const bCategoryMatch = bCategory.includes(searchLower);
+        const aSubcategoryMatch = aSubcategory.includes(searchLower);
+        const bSubcategoryMatch = bSubcategory.includes(searchLower);
+
+        // Priority 1: Name starts with search (highest)
+        if (aNameStarts && !bNameStarts) return -1;
+        if (!aNameStarts && bNameStarts) return 1;
+
+        // Priority 2: Name contains search
+        if (aNameMatch && !bNameMatch) return -1;
+        if (!aNameMatch && bNameMatch) return 1;
+
+        // Priority 3: Category matches
+        if (aCategoryMatch && !bCategoryMatch) return -1;
+        if (!aCategoryMatch && bCategoryMatch) return 1;
+
+        // Priority 4: Subcategory matches
+        if (aSubcategoryMatch && !bSubcategoryMatch) return -1;
+        if (!aSubcategoryMatch && bSubcategoryMatch) return 1;
+
+        // Default: alphabetical by name
+        return aName.localeCompare(bName);
+      });
+    }
+
     const count = await Product.countDocuments(query);
 
     // Get individual product counts for products with individual_stock_tracking
@@ -330,22 +378,16 @@ export const getProducts = async (req, res) => {
         counts.total += stat.count;
       });
 
-      // Attach individual product stats to products and ensure unit fields are included
+      // Attach individual product stats to products
       const productsWithStats = productsArray.map(product => {
-        const productWithStats = {
-          ...product,
-          // Ensure unit fields are always included (even if undefined in DB)
-          length_unit: product.length_unit || '',
-          width_unit: product.width_unit || '',
-          weight_unit: product.weight_unit || '',
-        };
-        
         if (product.individual_stock_tracking && statsMap.has(product.id)) {
           const stats = statsMap.get(product.id);
-          productWithStats.individual_product_stats = stats;
+          return {
+            ...product,
+            individual_product_stats: stats
+          };
         }
-        
-        return productWithStats;
+        return product;
       });
 
       console.timeEnd('⏱️ Get Products Query');

@@ -208,40 +208,27 @@ orderItemSchema.virtual('is_fully_selected').get(function() {
 orderItemSchema.set('toJSON', { virtuals: true });
 orderItemSchema.set('toObject', { virtuals: true });
 
-// Pre-save middleware - Calculate subtotal, GST, and total ONLY if not provided by frontend
+// Pre-save middleware - Calculate subtotal, GST, and total
 orderItemSchema.pre('save', function(next) {
-  console.log('PRE-SAVE HOOK - Received from frontend:', {
+  console.log('PRE-SAVE HOOK - Before:', {
     product: this.product_name,
     quantity: this.quantity,
     unit_price: this.unit_price,
-    subtotal: this.subtotal,
+    subtotal_before: this.subtotal,
     gst_rate: this.gst_rate,
-    gst_amount: this.gst_amount,
-    total_price: this.total_price,
+    gst_amount_before: this.gst_amount,
+    total_price_before: this.total_price,
     pricing_unit: this.pricing_unit,
     unit_value: this.unit_value
   });
 
-  // If subtotal and total_price are already provided by frontend, SKIP calculation
-  // Frontend uses pricing calculator for complex calculations (GSM, SQM, etc.)
-  const hasSubtotal = this.subtotal && parseFloat(this.subtotal) > 0;
-  const hasTotalPrice = this.total_price && parseFloat(this.total_price) > 0;
-
-  if (hasSubtotal && hasTotalPrice) {
-    console.log('✅ Using frontend calculated values - NO recalculation needed');
-    this.updated_at = new Date();
-    next();
-    return;
-  }
-
-  // Only calculate if frontend didn't provide values (fallback for old data or simple items)
-  console.log('⚠️ Frontend did not provide calculated values - calculating now...');
-
+  // Calculate subtotal (quantity * unit_price)
   const quantity = parseFloat(this.quantity) || 0;
   const unitPrice = parseFloat(this.unit_price) || 0;
   const subtotal = quantity * unitPrice;
   this.subtotal = subtotal.toFixed(2);
 
+  // Calculate GST amount based on GST rate
   const gstRate = parseFloat(this.gst_rate) || 0;
   let gstAmount = 0;
 
@@ -251,10 +238,11 @@ orderItemSchema.pre('save', function(next) {
 
   this.gst_amount = gstAmount.toFixed(2);
 
+  // Calculate total price (subtotal + GST)
   const totalPrice = subtotal + gstAmount;
   this.total_price = totalPrice.toFixed(2);
 
-  console.log('BACKEND CALCULATED VALUES:', {
+  console.log('CALCULATED VALUES:', {
     subtotal: this.subtotal,
     gst_amount: this.gst_amount,
     total_price: this.total_price

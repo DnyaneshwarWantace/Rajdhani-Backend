@@ -11,14 +11,10 @@ import { escapeRegex } from '../utils/regexHelper.js';
 // Create a new order
 export const createOrder = async (req, res) => {
   try {
-    // Get user information from authenticated request
-    const createdBy = req.user?.full_name || req.user?.name || req.user?.email || 'System';
-
     const orderData = {
       ...req.body,
       id: await generateOrderId(),
-      order_number: await generateOrderNumber(),
-      created_by: createdBy
+      order_number: await generateOrderNumber()
     };
 
     // Validate customer exists
