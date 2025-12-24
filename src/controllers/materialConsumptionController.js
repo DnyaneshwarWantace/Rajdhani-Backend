@@ -4,6 +4,7 @@ import { generateId } from '../utils/idGenerator.js';
 import Product from '../models/Product.js';
 import RawMaterial from '../models/RawMaterial.js';
 import IndividualProduct from '../models/IndividualProduct.js';
+import IndividualRawMaterial from '../models/IndividualRawMaterial.js';
 import { ProductionBatch } from '../models/Production.js';
 
 // Get all material consumption records
@@ -377,18 +378,111 @@ const createMaterialConsumption = async (req, res) => {
         // For raw materials: Only deduct if consumption_status is 'used'
         // If status is 'in_production', don't deduct yet (will deduct when wastage completes)
         const consumptionStatus = req.body.consumption_status || 'in_production';
-        
+
         if (consumptionStatus === 'used') {
           // Deduct from inventory only when status is 'used'
           await RawMaterial.findOneAndUpdate(
             { id: material_id },
-            { 
+            {
               $inc: { current_stock: -quantity_used },
               $set: { updated_at: new Date() }
             }
           );
+
+          // Mark IndividualRawMaterial records as 'used'
+          const availableMaterials = await IndividualRawMaterial.find({
+            material_id: material_id,
+            status: 'available'
+          }).sort({ purchase_date: 1 }).limit(100);
+
+          let remaining = quantity_used;
+          for (const material of availableMaterials) {
+            if (remaining <= 0) break;
+
+            if (material.quantity <= remaining) {
+              // Use entire material record
+              material.status = 'used';
+              material.production_batch_id = production_batch_id;
+              await material.save();
+              remaining -= material.quantity;
+            } else {
+              // Split material record
+              const usedQty = remaining;
+              const availableQty = material.quantity - remaining;
+
+              // Update existing record to reduce quantity
+              material.quantity = availableQty;
+              await material.save();
+
+              // Create new record for used portion
+              const usedMaterial = new IndividualRawMaterial({
+                id: await generateId('IRM'),
+                material_id: material.material_id,
+                material_name: material.material_name,
+                quantity: usedQty,
+                unit: material.unit,
+                status: 'used',
+                production_batch_id: production_batch_id,
+                purchase_date: material.purchase_date,
+                supplier_id: material.supplier_id,
+                supplier_name: material.supplier_name,
+                cost_per_unit: material.cost_per_unit,
+                total_cost: usedQty * material.cost_per_unit,
+                notes: `Used in production batch ${production_batch_id}`
+              });
+              await usedMaterial.save();
+              remaining = 0;
+            }
+          }
+
           console.log(`✅ Deducted ${quantity_used} ${unit} of ${material_name} from inventory (status: used)`);
         } else {
+          // Status is 'in_production' - mark IndividualRawMaterial as 'in_production'
+          const availableMaterials = await IndividualRawMaterial.find({
+            material_id: material_id,
+            status: 'available'
+          }).sort({ purchase_date: 1 }).limit(100);
+
+          let remaining = quantity_used;
+          for (const material of availableMaterials) {
+            if (remaining <= 0) break;
+
+            if (material.quantity <= remaining) {
+              // Use entire material record
+              material.status = 'in_production';
+              material.production_batch_id = production_batch_id;
+              await material.save();
+              remaining -= material.quantity;
+            } else {
+              // Split material record
+              const inProdQty = remaining;
+              const availableQty = material.quantity - remaining;
+
+              // Update existing record to reduce quantity
+              material.quantity = availableQty;
+              await material.save();
+
+              // Create new record for in_production portion
+              const inProdMaterial = new IndividualRawMaterial({
+                id: await generateId('IRM'),
+                material_id: material.material_id,
+                material_name: material.material_name,
+                quantity: inProdQty,
+                unit: material.unit,
+                status: 'in_production',
+                production_batch_id: production_batch_id,
+                purchase_date: material.purchase_date,
+                supplier_id: material.supplier_id,
+                supplier_name: material.supplier_name,
+                cost_per_unit: material.cost_per_unit,
+                total_cost: inProdQty * material.cost_per_unit,
+                notes: `In production for batch ${production_batch_id}`
+              });
+              await inProdMaterial.save();
+              remaining = 0;
+            }
+          }
+
           // Status is 'in_production' - don't deduct yet, just track consumption
           console.log(`📦 Raw material ${material_name}: ${quantity_used} ${unit} marked as 'in_production' (not deducted yet)`);
         }
@@ -396,7 +490,7 @@ const createMaterialConsumption = async (req, res) => {
     }
 
     // Update individual product status if individual products are specified
-    // IMPORTANT: Mark as "in_production" when production starts, "consumed" only when wastage is recorded
+    // IMPORTANT: Mark as "in_production" when production starts, "used" only when wastage is recorded
     if (individual_product_ids && individual_product_ids.length > 0) {
       // Always mark individual products as "in_production" when they're added to production
       // This happens when production starts (deduct_now can be false for planning, but we still mark as in_production)
@@ -406,8 +500,8 @@ const createMaterialConsumption = async (req, res) => {
       
       await IndividualProduct.updateMany(
         { id: { $in: individual_product_ids } },
-        { 
-          $set: { 
+        {
+          $set: {
             status: 'in_production',
             batch_number: batchNumber,
             updated_at: new Date()
@@ -415,45 +509,70 @@ const createMaterialConsumption = async (req, res) => {
         }
       );
       console.log(`✅ Marked ${individual_product_ids.length} individual products as in_production (batch: ${batchNumber})`);
-      
-      // Only mark as "consumed" if deduct_now is true AND we're actually consuming (not just planning)
-      // Note: "consumed" status should typically be set when wastage is recorded, not here
+
+      // CRITICAL: Update parent product's current_stock to reflect only available products
+      // Get the first individual product to find its product_id
+      const firstIndividualProduct = await IndividualProduct.findOne({ id: individual_product_ids[0] });
+      if (firstIndividualProduct && firstIndividualProduct.product_id) {
+        const parentProduct = await Product.findOne({ id: firstIndividualProduct.product_id });
+        if (parentProduct && parentProduct.individual_stock_tracking) {
+          // Count only "available" status individual products
+          const availableCount = await IndividualProduct.countDocuments({
+            product_id: firstIndividualProduct.product_id,
+            status: 'available'
+          });
+          // Count total individual products (all statuses)
+          const totalCount = await IndividualProduct.countDocuments({
+            product_id: firstIndividualProduct.product_id
+          });
+
+          // Update parent product's stock counts
+          // current_stock = available only (for planning/selling operations)
+          // individual_products_count = total count (for tracking/display)
+          parentProduct.current_stock = availableCount;
+          parentProduct.individual_products_count = totalCount;
+          await parentProduct.save();
+          console.log(`✅ Updated parent product ${firstIndividualProduct.product_id} stock: ${availableCount} available / ${totalCount} total (${individual_product_ids.length} moved to in_production)`);
+        }
+      }
+
+      // Only mark as "used" if deduct_now is true AND we're actually consuming (not just planning)
+      // Note: "used" status should typically be set when wastage is recorded, not here
       // This is kept for backward compatibility
       if (deductNow && material_type === 'raw_material') {
-        // For raw materials, mark as consumed immediately if deduct_now is true
+        // For raw materials, mark as used immediately if deduct_now is true
         await IndividualProduct.updateMany(
           { id: { $in: individual_product_ids } },
           { 
             $set: { 
-              status: 'consumed',
-              consumed_at: new Date(),
+              status: 'used',
               updated_at: new Date()
             }
           }
         );
-        console.log(`✅ Marked ${individual_product_ids.length} individual products as consumed (raw material, deduct_now=true)`);
+        console.log(`✅ Marked ${individual_product_ids.length} individual products as used (raw material, deduct_now=true)`);
       }
     } else if (material_type === 'product') {
       // Fallback: If no individual_product_ids were provided but this is a product with individual tracking,
-      // try to find consumed individual products that match this consumption record
+      // try to find used individual products that match this consumption record
       const product = await Product.findOne({ id: material_id });
       if (product && product.individual_stock_tracking) {
-        // Look for individual products that were consumed around the same time
+        // Look for individual products that were used around the same time
         const consumedDate = new Date(savedConsumption.consumed_at);
         const startDate = new Date(consumedDate.getTime() - 24 * 60 * 60 * 1000); // 1 day before
         const endDate = new Date(consumedDate.getTime() + 24 * 60 * 60 * 1000); // 1 day after
 
-        const consumedProducts = await IndividualProduct.find({
+        const usedProducts = await IndividualProduct.find({
           product_id: material_id,
-          status: 'consumed',
-          consumed_at: {
+          status: 'used',
+          updated_at: {
             $gte: startDate,
             $lte: endDate
           }
         }).limit(quantity_used || 10);
 
-        if (consumedProducts.length > 0) {
-          const foundIds = consumedProducts.map(ip => ip.id);
+        if (usedProducts.length > 0) {
+          const foundIds = usedProducts.map(ip => ip.id);
           await MaterialConsumption.findOneAndUpdate(
             { id: savedConsumption.id },
             { $set: { individual_product_ids: foundIds } }
@@ -525,7 +644,9 @@ const updateMaterialConsumption = async (req, res) => {
     }
 
     // Handle status updates based on material type
-    if (updateData.consumption_status === 'used') {
+    // For product-type materials: Always check and update individual products when consumption_status is set to 'used'
+    // This happens when wastage stage is completed
+    if (updateData.consumption_status === 'used' || (consumption.material_type === 'product' && updateData.consumption_status === 'used')) {
       if (consumption.material_type === 'raw_material') {
         // For raw materials: When status changes to 'used', deduct from inventory
         if (existingConsumption.consumption_status !== 'used') {
@@ -544,17 +665,26 @@ const updateMaterialConsumption = async (req, res) => {
           consumption.individual_product_ids.length > 0) {
         
         // For products: Mark individual products as used when wastage is completed
-        // Check if any of these individual products are still in_production
+        // This is CRITICAL - when wastage stage completes, all individual products used as materials
+        // must change from 'in_production' to 'used'
+        console.log(`🔄 Checking individual products for product material: ${consumption.material_name}`);
+        console.log(`📦 Individual product IDs: ${consumption.individual_product_ids.length}`);
+        
         const individualProducts = await IndividualProduct.find({
           id: { $in: consumption.individual_product_ids }
         });
         
+        console.log(`📦 Found ${individualProducts.length} individual products in database`);
+        
         const productsInProduction = individualProducts.filter(ip => ip.status === 'in_production');
+        
+        console.log(`📦 Products still in 'in_production': ${productsInProduction.length}`);
         
         if (productsInProduction.length > 0) {
           // Mark these individual products as used (wastage step completed)
+          const productIdsToUpdate = productsInProduction.map(ip => ip.id);
           await IndividualProduct.updateMany(
-            { id: { $in: productsInProduction.map(ip => ip.id) } },
+            { id: { $in: productIdsToUpdate } },
             { 
               $set: { 
                 status: 'used',
@@ -564,6 +694,7 @@ const updateMaterialConsumption = async (req, res) => {
           );
           
           console.log(`✅ Marked ${productsInProduction.length} individual products as used (wastage step completed)`);
+          console.log(`✅ Updated product IDs:`, productIdsToUpdate);
           
           // Also update product stock counts
           const product = await Product.findOne({ id: consumption.material_id });
@@ -572,17 +703,23 @@ const updateMaterialConsumption = async (req, res) => {
               product_id: consumption.material_id,
               status: 'available'
             });
+            const totalCount = await IndividualProduct.countDocuments({
+              product_id: consumption.material_id
+            });
             await Product.findOneAndUpdate(
               { id: consumption.material_id },
-              { 
-                $set: { 
-                  current_stock: availableCount,
-                  individual_products_count: availableCount,
+              {
+                $set: {
+                  current_stock: availableCount, // Only available products (for operations)
+                  individual_products_count: totalCount, // Total count (for tracking/display)
                   updated_at: new Date()
                 }
               }
             );
+            console.log(`✅ Updated product stock count: ${availableCount} available / ${totalCount} total`);
           }
+        } else {
+          console.log(`ℹ️ No individual products in 'in_production' status to update for ${consumption.material_name}`);
         }
       }
     }

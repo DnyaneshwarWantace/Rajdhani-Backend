@@ -3,7 +3,9 @@ import ProductionMachine from '../models/ProductionMachine.js';
 import ProductionWaste from '../models/ProductionWaste.js';
 import PlanningDraftState from '../models/PlanningDraftState.js';
 import IndividualProduct from '../models/IndividualProduct.js';
+import IndividualRawMaterial from '../models/IndividualRawMaterial.js';
 import Product from '../models/Product.js';
+import RawMaterial from '../models/RawMaterial.js';
 import User from '../models/User.js';
 import { generateId } from '../utils/idGenerator.js';
 import {
@@ -258,8 +260,8 @@ export const updateProduction = async (req, res) => {
             });
             await Product.findOneAndUpdate(
               { id: productId },
-              { 
-                $set: { 
+              {
+                $set: {
                   current_stock: availableCount,
                   individual_products_count: availableCount,
                   updated_at: new Date()
@@ -267,6 +269,50 @@ export const updateProduction = async (req, res) => {
               }
             );
           }
+        }
+
+        // Update IndividualRawMaterial records from 'in_production' to 'used'
+        const inProductionMaterials = await IndividualRawMaterial.find({
+          production_batch_id: updated.id,
+          status: 'in_production'
+        });
+
+        console.log(`📦 Found ${inProductionMaterials.length} raw material records in production for batch ${updated.batch_number}`);
+
+        if (inProductionMaterials.length > 0) {
+          // Update all in_production materials to 'used'
+          await IndividualRawMaterial.updateMany(
+            {
+              production_batch_id: updated.id,
+              status: 'in_production'
+            },
+            {
+              $set: {
+                status: 'used',
+                updated_at: new Date()
+              }
+            }
+          );
+
+          // Deduct from RawMaterial current_stock
+          const materialUpdates = new Map();
+          inProductionMaterials.forEach(material => {
+            const current = materialUpdates.get(material.material_id) || 0;
+            materialUpdates.set(material.material_id, current + material.quantity);
+          });
+
+          for (const [materialId, totalQty] of materialUpdates) {
+            await RawMaterial.findOneAndUpdate(
+              { id: materialId },
+              {
+                $inc: { current_stock: -totalQty },
+                $set: { updated_at: new Date() }
+              }
+            );
+            console.log(`✅ Deducted ${totalQty} from ${materialId} stock (production completed)`);
+          }
+
+          console.log(`✅ Updated ${inProductionMaterials.length} raw material records to 'used' status`);
         }
       } catch (error) {
         console.error('Error updating individual products on production completion:', error);
@@ -369,14 +415,65 @@ export const createProductionWaste = async (req, res) => {
     const id = await generateId('WASTE');
     const waste_number = data.waste_number || `WASTE-${Date.now().toString().slice(-6)}`;
     
+    // Get batch to fetch product_id and product_name (required fields)
+    // Always fetch from batch to ensure we have the correct product info
+    const batchId = data.batch_id || data.production_batch_id;
+    let productId = data.product_id;
+    let productName = data.product_name;
+    
+    if (batchId) {
+      try {
+        const batch = await ProductionBatch.findOne({ id: batchId });
+        if (batch) {
+          // Always use batch's product_id and product_name (they are the source of truth)
+          if (batch.product_id) {
+            productId = batch.product_id;
+          }
+          // Try to get product name from Product collection for accuracy
+          if (batch.product_id) {
+            try {
+              const Product = (await import('../models/Product.js')).default;
+              const product = await Product.findOne({ id: batch.product_id });
+              if (product && product.name) {
+                productName = product.name;
+              } else if (batch.product_name) {
+                productName = batch.product_name;
+              }
+            } catch (err) {
+              if (batch.product_name) {
+                productName = batch.product_name;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching batch for product_id:', err);
+      }
+    }
+    
+    // Validate required fields
+    if (!productId) {
+      return res.status(400).json({
+        success: false,
+        error: 'product_id is required. Could not fetch from batch.'
+      });
+    }
+    
+    if (!productName) {
+      return res.status(400).json({
+        success: false,
+        error: 'product_name is required. Could not fetch from batch.'
+      });
+    }
+    
     // Ensure all required fields are included
     const wasteData = {
       id,
       waste_number,
-      production_id: data.production_id || data.batch_id || '',
-      batch_id: data.batch_id || data.production_batch_id || '',
-      product_id: data.product_id || '',
-      product_name: data.product_name || 'Unknown Product',
+      production_id: data.production_id || batchId || '',
+      batch_id: batchId || '',
+      product_id: productId,
+      product_name: productName,
       waste_type: data.waste_type || 'other',
       waste_category: data.waste_category || (data.can_be_reused ? 'reusable' : 'disposable'),
       quantity: data.quantity || 0,
@@ -396,7 +493,6 @@ export const createProductionWaste = async (req, res) => {
     };
     
     // If this is the first waste record for this batch, mark wastage_stage as 'in_progress'
-    const batchId = data.batch_id || data.production_batch_id;
     if (batchId) {
       const existingWaste = await ProductionWaste.findOne({ 
         production_batch_id: batchId 

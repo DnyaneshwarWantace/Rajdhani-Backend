@@ -166,37 +166,93 @@ materialConsumptionSchema.pre('save', function(next) {
 
 // Static method to get consumption summary for a production batch
 materialConsumptionSchema.statics.getBatchSummary = async function(productionBatchId) {
-  const summary = await this.aggregate([
-    { $match: { production_batch_id: productionBatchId, status: 'active' } },
-    {
-      $group: {
-        _id: {
-          material_type: '$material_type',
-          material_id: '$material_id',
-          material_name: '$material_name',
-          unit: '$unit'
-        },
-        total_quantity: { $sum: '$quantity_used' },
-        total_waste: { $sum: '$waste_quantity' },
-        consumption_count: { $sum: 1 },
-        last_consumed: { $max: '$consumed_at' }
-      }
-    },
-    {
-      $project: {
-        material_type: '$_id.material_type',
-        material_id: '$_id.material_id',
-        material_name: '$_id.material_name',
-        unit: '$_id.unit',
-        total_quantity: 1,
-        total_waste: 1,
-        consumption_count: 1,
-        last_consumed: 1,
-        _id: 0
+  // Import IndividualProduct model
+  const IndividualProduct = mongoose.model('IndividualProduct');
+
+  // Get all MaterialConsumption records for this batch
+  const consumptionRecords = await this.find({
+    production_batch_id: productionBatchId,
+    status: 'active'
+  }).lean();
+
+  // Group by material and fetch real-time individual product statuses
+  const materialMap = new Map();
+
+  for (const record of consumptionRecords) {
+    const key = `${record.material_id}`;
+
+    if (!materialMap.has(key)) {
+      materialMap.set(key, {
+        material_type: record.material_type,
+        material_id: record.material_id,
+        material_name: record.material_name,
+        unit: record.unit,
+        quantity_per_sqm: record.quantity_per_sqm || 0,
+        required_quantity: 0,
+        actual_consumed_quantity: 0,
+        whole_product_count: 0,
+        total_waste: 0,
+        consumption_count: 0,
+        individual_product_ids: [],
+        individual_products: [],
+        last_consumed: record.consumed_at
+      });
+    }
+
+    const material = materialMap.get(key);
+    material.required_quantity += record.quantity_used || 0;
+    material.actual_consumed_quantity += record.actual_consumed_quantity || record.quantity_used || 0;
+    material.whole_product_count += record.quantity_used || 0;
+    material.total_waste += record.waste_quantity || 0;
+    material.consumption_count += 1;
+
+    if (record.consumed_at > material.last_consumed) {
+      material.last_consumed = record.consumed_at;
+    }
+
+    // Collect individual product IDs
+    if (record.individual_product_ids && record.individual_product_ids.length > 0) {
+      material.individual_product_ids.push(...record.individual_product_ids);
+    }
+  }
+
+  // Fetch real-time status for individual products
+  const summary = [];
+  for (const material of materialMap.values()) {
+    // For products with individual tracking, fetch current status
+    if (material.material_type === 'product' && material.individual_product_ids.length > 0) {
+      try {
+        console.log(`🔍 Fetching real-time status for ${material.individual_product_ids.length} individual products of ${material.material_name}`);
+
+        const individualProducts = await IndividualProduct.find({
+          id: { $in: material.individual_product_ids }
+        }).lean();
+
+        console.log(`✅ Found ${individualProducts.length} individual products with statuses:`,
+          individualProducts.map(p => ({ id: p.id, status: p.status }))
+        );
+
+        material.individual_products = individualProducts.map(p => ({
+          id: p.id,
+          qr_code: p.qr_code,
+          serial_number: p.serial_number,
+          product_name: p.product_name,
+          status: p.status, // Real-time status
+          length: p.final_length || '',
+          width: p.final_width || '',
+          weight: p.final_weight || '',
+          color: p.color || '',
+          pattern: p.pattern || ''
+        }));
+      } catch (error) {
+        console.error(`Error fetching individual products for material ${material.material_id}:`, error);
       }
     }
-  ]);
-  
+
+    summary.push(material);
+  }
+
+  console.log(`📦 Returning ${summary.length} materials in summary`);
   return summary;
 };
 

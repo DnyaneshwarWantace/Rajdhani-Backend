@@ -23,6 +23,7 @@ import permissionRoutes from './routes/permissionRoutes.js';
 import roleRoutes from './routes/roleRoutes.js';
 import imageRoutes from './routes/imageRoutes.js';
 import activityLogRoutes from './routes/activityLogRoutes.js';
+import analyticsRoutes from './routes/analyticsRoutes.js';
 import { activityLogMiddleware } from './middleware/activityLogMiddleware.js';
 import { setSocketIO } from './utils/detailedLogger.js';
 
@@ -131,6 +132,7 @@ app.use('/api/production', productionRoutes);
 app.use('/api/material-consumption', materialConsumptionRoutes);
 app.use('/api/images', imageRoutes);
 app.use('/api/activity-logs', activityLogRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // Cleanup routes
 import cleanupRoutes from './routes/cleanupRoutes.js';

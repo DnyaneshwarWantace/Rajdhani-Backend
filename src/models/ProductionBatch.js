@@ -95,5 +95,5 @@ ProductionBatchSchema.index({ created_at: -1 });
 ProductionBatchSchema.index({ assigned_machine: 1 });
 ProductionBatchSchema.index({ assigned_operator: 1 });
 
-const ProductionBatch = mongoose.model('ProductionBatch', ProductionBatchSchema);
+const ProductionBatch = mongoose.models.ProductionBatch || mongoose.model('ProductionBatch', ProductionBatchSchema);
 export default ProductionBatch;

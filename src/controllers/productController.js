@@ -273,18 +273,16 @@ export const getProducts = async (req, res) => {
       query.individual_stock_tracking = individual_stock_tracking === 'true';
     }
 
-    let products = await Product.find(query)
-      .collation({ locale: 'en', strength: 2 })
-      .sort({ name: 1 })
-      .limit(parseInt(limit))
-      .skip(parseInt(offset));
+    // First, get ALL matching products without pagination to sort them properly
+    let allProducts = await Product.find(query)
+      .collation({ locale: 'en', strength: 2 });
 
     // Convert to plain objects
-    let productsArray = products.map(p => p.toObject());
+    let productsArray = allProducts.map(p => p.toObject());
 
-    // If search is active, prioritize results by match type
-    // Priority: name matches first, then category, then subcategory, then color/pattern
+    // Sort products based on search or stock status
     if (search) {
+      // If searching, sort alphabetically by name
       const searchLower = search.toLowerCase();
 
       productsArray = productsArray.sort((a, b) => {
@@ -312,14 +310,20 @@ export const getProducts = async (req, res) => {
         // Priority 1: Name starts with search (highest)
         if (aNameStarts && !bNameStarts) return -1;
         if (!aNameStarts && bNameStarts) return 1;
+        // If both start with search, sort alphabetically
+        if (aNameStarts && bNameStarts) return aName.localeCompare(bName);
 
         // Priority 2: Name contains search
         if (aNameMatch && !bNameMatch) return -1;
         if (!aNameMatch && bNameMatch) return 1;
+        // If both contain search, sort alphabetically
+        if (aNameMatch && bNameMatch) return aName.localeCompare(bName);
 
         // Priority 3: Category matches
         if (aCategoryMatch && !bCategoryMatch) return -1;
         if (!aCategoryMatch && bCategoryMatch) return 1;
+        // If both match category, sort alphabetically
+        if (aCategoryMatch && bCategoryMatch) return aName.localeCompare(bName);
 
         // Priority 4: Subcategory matches
         if (aSubcategoryMatch && !bSubcategoryMatch) return -1;
@@ -328,12 +332,40 @@ export const getProducts = async (req, res) => {
         // Default: alphabetical by name
         return aName.localeCompare(bName);
       });
+    } else {
+      // If not searching, sort by stock status: in-stock -> low-stock -> out-of-stock
+      productsArray = productsArray.sort((a, b) => {
+        // Calculate stock status for each product
+        const getStockStatus = (product) => {
+          const stock = product.current_stock || 0;
+          const minLevel = product.min_stock_level || 0;
+
+          if (stock === 0) return 'out-of-stock';
+          if (stock < minLevel) return 'low-stock';
+          return 'in-stock';
+        };
+
+        const statusA = getStockStatus(a);
+        const statusB = getStockStatus(b);
+
+        const statusOrder = { 'in-stock': 1, 'low-stock': 2, 'out-of-stock': 3 };
+
+        // Sort by status first
+        const statusDiff = statusOrder[statusA] - statusOrder[statusB];
+        if (statusDiff !== 0) return statusDiff;
+
+        // If same status, sort alphabetically
+        return (a.name || '').localeCompare(b.name || '');
+      });
     }
 
-    const count = await Product.countDocuments(query);
+    // Apply pagination AFTER sorting
+    const paginatedProducts = productsArray.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+
+    const count = productsArray.length;
 
     // Get individual product counts for products with individual_stock_tracking
-    const productsWithIndividualTracking = productsArray.filter(p => p.individual_stock_tracking);
+    const productsWithIndividualTracking = paginatedProducts.filter(p => p.individual_stock_tracking);
     
     if (productsWithIndividualTracking.length > 0) {
       const productIds = productsWithIndividualTracking.map(p => p.id);
@@ -379,7 +411,7 @@ export const getProducts = async (req, res) => {
       });
 
       // Attach individual product stats to products
-      const productsWithStats = productsArray.map(product => {
+      const productsWithStats = paginatedProducts.map(product => {
         if (product.individual_stock_tracking && statsMap.has(product.id)) {
           const stats = statsMap.get(product.id);
           return {
@@ -400,10 +432,10 @@ export const getProducts = async (req, res) => {
     } else {
       // No products with individual tracking, return as is
       console.timeEnd('⏱️ Get Products Query');
-      console.log(`✅ Returned ${productsArray.length} products (total: ${count})`);
+      console.log(`✅ Returned ${paginatedProducts.length} products (total: ${count})`);
       res.json({
         success: true,
-        data: productsArray,
+        data: paginatedProducts,
         count
       });
     }
@@ -713,6 +745,9 @@ export const getProductStats = async (req, res) => {
       individual_tracking_products: trackingCounts.true || 0,
       total_individual_products: Object.values(individualCounts).reduce((sum, count) => sum + count, 0),
       available_individual_products: individualCounts.available || 0,
+      in_production_individual_products: individualCounts.in_production || 0,
+      consumed_individual_products: individualCounts.consumed || 0,
+      used_individual_products: individualCounts.used || 0,
       sold_individual_products: individualCounts.sold || 0,
       damaged_individual_products: individualCounts.damaged || 0,
       total_stock_value: totalStockValue,

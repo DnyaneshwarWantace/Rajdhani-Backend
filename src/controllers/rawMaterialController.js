@@ -2,6 +2,7 @@ import RawMaterial from '../models/RawMaterial.js';
 import StockMovement from '../models/StockMovement.js';
 import DropdownOption from '../models/DropdownOption.js';
 import MaterialConsumption from '../models/MaterialConsumption.js';
+import IndividualRawMaterial from '../models/IndividualRawMaterial.js';
 import { generateRawMaterialId, generateId } from '../utils/idGenerator.js';
 import { logMaterialCreate, logMaterialUpdate, logMaterialStockUpdate, logMaterialDelete } from '../utils/detailedLogger.js';
 import { escapeRegex } from '../utils/regexHelper.js';
@@ -177,7 +178,7 @@ export const getRawMaterials = async (req, res) => {
       materials = fuzzyFilterAndSort(materials, search, ['name', 'type', 'category'], 0.8);
     }
 
-    // Get consumption breakdown for each material
+    // Get consumption breakdown from MaterialConsumption records
     const materialIds = materials.map(m => m.id);
     if (materialIds.length > 0) {
       const consumptionData = await MaterialConsumption.aggregate([
@@ -224,17 +225,18 @@ export const getRawMaterials = async (req, res) => {
           used: 0,
           sold: 0
         };
-        
-        // Calculate available stock (current_stock - in_production - reserved)
+
+        // Available stock = current_stock - in_production - reserved
         const availableStock = Math.max(0, material.current_stock - breakdown.in_production - breakdown.reserved);
-        
+
         return {
           ...material,
           available_stock: availableStock,
           in_production: breakdown.in_production,
           reserved: breakdown.reserved,
+          used: breakdown.used,
           sold: breakdown.sold,
-          used: breakdown.used
+          damaged: 0 // Not tracked for raw materials
         };
       });
     }
@@ -263,6 +265,7 @@ export const getRawMaterialById = async (req, res) => {
   try {
     // Decode URL-encoded ID
     const materialId = decodeURIComponent(req.params.id);
+    const { include_consumption } = req.query;
 
     // Try to find by custom id field first
     let material = await RawMaterial.findOne({ id: materialId });
@@ -284,9 +287,56 @@ export const getRawMaterialById = async (req, res) => {
       });
     }
 
+    // Convert to plain object
+    let materialData = material.toObject();
+
+    // Calculate consumption breakdown if requested
+    if (include_consumption === 'true') {
+      const consumptionData = await MaterialConsumption.aggregate([
+        {
+          $match: {
+            material_id: material.id,
+            material_type: 'raw_material',
+            status: 'active'
+          }
+        },
+        {
+          $group: {
+            _id: '$consumption_status',
+            total: { $sum: '$quantity_used' }
+          }
+        }
+      ]);
+
+      const breakdown = {
+        in_production: 0,
+        reserved: 0,
+        used: 0,
+        sold: 0
+      };
+
+      consumptionData.forEach(item => {
+        const status = item._id || 'in_production';
+        breakdown[status] = item.total;
+      });
+
+      // Available stock = current_stock - in_production - reserved
+      const availableStock = Math.max(0, material.current_stock - breakdown.in_production - breakdown.reserved);
+
+      materialData = {
+        ...materialData,
+        available_stock: availableStock,
+        in_production: breakdown.in_production,
+        reserved: breakdown.reserved,
+        used: breakdown.used,
+        sold: breakdown.sold,
+        damaged: 0 // Not tracked for raw materials
+      };
+    }
+
     res.json({
       success: true,
-      data: material
+      data: materialData
     });
   } catch (error) {
     console.error('Error fetching raw material:', error);
@@ -551,18 +601,37 @@ export const adjustStock = async (req, res) => {
     if (quantity > 0) {
       material.last_restocked = new Date();
     }
-    
+
     // Recalculate status
     material.status = calculateMaterialStatus(
       newStock,
       material.min_threshold,
       material.max_capacity
     );
-    
+
     // Recalculate total value
     material.total_value = newStock * material.cost_per_unit;
-    
+
     await material.save();
+
+    // If adding stock, create IndividualRawMaterial records
+    if (quantity > 0) {
+      const individualMaterial = new IndividualRawMaterial({
+        id: await generateId('IRM'),
+        material_id: material.id,
+        material_name: material.name,
+        quantity: quantity,
+        unit: material.unit,
+        status: 'available',
+        purchase_date: new Date(),
+        supplier_id: material.supplier_id,
+        supplier_name: material.supplier_name,
+        cost_per_unit: material.cost_per_unit,
+        total_cost: quantity * material.cost_per_unit,
+        notes: notes || `Stock added via adjustment: ${reason || 'adjustment'}`
+      });
+      await individualMaterial.save();
+    }
 
     // Record stock movement
     const stockMovement = new StockMovement({

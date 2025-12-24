@@ -51,7 +51,7 @@ const ProductionBatchSchema = new mongoose.Schema({
     has_wastage: { type: Boolean, default: false }
   },
   final_stage: {
-    status: { type: String, enum: ['not_started', 'completed'], default: 'not_started' },
+    status: { type: String, enum: ['not_started', 'in_progress', 'completed'], default: 'not_started' },
     started_by: { type: String },
     started_at: { type: Date },
     completed_by: { type: String },
