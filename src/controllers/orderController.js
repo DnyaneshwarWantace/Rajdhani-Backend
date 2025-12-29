@@ -818,16 +818,34 @@ export const updateOrderStatus = async (req, res) => {
           console.log(`==========================================\n`);
 
           const orderItems = await OrderItem.find({ order_id: order.id });
+          console.log(`📦 Found ${orderItems.length} order items to process`);
           
+          let rawMaterialCount = 0;
           for (const item of orderItems) {
+            console.log(`\n🔍 Processing item: ${item.product_name} (Type: ${item.product_type})`);
+            console.log(`   Item ID: ${item.id}`);
+            console.log(`   Raw Material ID: ${item.raw_material_id || 'N/A'}`);
+            console.log(`   Quantity: ${item.quantity} ${item.unit}`);
+            
             if (item.product_type === 'raw_material' && item.raw_material_id) {
+              rawMaterialCount++;
+              console.log(`\n✅ This is a raw material - will reserve stock`);
+              
               const rawMaterial = await RawMaterial.findOne({ id: item.raw_material_id });
               
               if (rawMaterial) {
                 const currentReserved = rawMaterial.reserved_stock || 0;
                 const currentStock = rawMaterial.current_stock || 0;
+                const inProduction = rawMaterial.in_production || 0;
                 const newReserved = currentReserved + item.quantity;
-                const availableAfter = currentStock - newReserved - (rawMaterial.in_production || 0);
+                const availableAfter = currentStock - newReserved - inProduction;
+
+                console.log(`\n📊 BEFORE RESERVATION:`);
+                console.log(`   Material: ${rawMaterial.name} (${rawMaterial.id})`);
+                console.log(`   Current Stock: ${currentStock} ${item.unit}`);
+                console.log(`   Reserved Stock: ${currentReserved} ${item.unit}`);
+                console.log(`   In Production: ${inProduction} ${item.unit}`);
+                console.log(`   Available: ${currentStock - currentReserved - inProduction} ${item.unit}`);
 
                 const updateResult = await RawMaterial.findOneAndUpdate(
                   { id: item.raw_material_id },
@@ -835,23 +853,33 @@ export const updateOrderStatus = async (req, res) => {
                   { new: true }
                 );
 
-                console.log(`✅ Reserved ${item.quantity} ${item.unit} of ${rawMaterial.name}`);
-                console.log(`   Reserved: ${currentReserved} → ${newReserved} ${item.unit}`);
-                console.log(`   Available: ${availableAfter} ${item.unit}`);
+                if (updateResult) {
+                  console.log(`\n✅ AFTER RESERVATION:`);
+                  console.log(`   Reserved Stock: ${currentReserved} → ${newReserved} ${item.unit} (+${item.quantity})`);
+                  console.log(`   Available: ${availableAfter} ${item.unit}`);
+                  console.log(`   ✅ Successfully reserved ${item.quantity} ${item.unit} of ${rawMaterial.name}`);
+                } else {
+                  console.log(`❌ Failed to update material in database`);
+                }
               } else {
-                console.log(`⚠️  Material not found: ${item.raw_material_id}`);
+                console.log(`❌ Material not found in database: ${item.raw_material_id}`);
               }
+            } else {
+              console.log(`ℹ️  Skipping - not a raw material (type: ${item.product_type})`);
             }
           }
 
           console.log(`\n✅ ========== RESERVATION COMPLETED ==========`);
           console.log(`📋 Order: ${order.order_number || order.id}`);
-          console.log(`✅ All raw materials reserved`);
+          console.log(`📦 Total Items Processed: ${orderItems.length}`);
+          console.log(`🔒 Raw Materials Reserved: ${rawMaterialCount}`);
+          console.log(`✅ All raw materials reserved successfully`);
           console.log(`==========================================\n`);
         } catch (error) {
           console.error(`\n❌ ========== ERROR RESERVING MATERIALS ==========`);
           console.error(`📋 Order: ${order.id}`);
           console.error(`❌ Error:`, error);
+          console.error(`❌ Stack:`, error.stack);
           console.error(`==========================================\n`);
         }
         break;
