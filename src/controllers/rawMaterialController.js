@@ -3,6 +3,8 @@ import StockMovement from '../models/StockMovement.js';
 import DropdownOption from '../models/DropdownOption.js';
 import MaterialConsumption from '../models/MaterialConsumption.js';
 import IndividualRawMaterial from '../models/IndividualRawMaterial.js';
+import Order from '../models/Order.js';
+import OrderItem from '../models/OrderItem.js';
 import { generateRawMaterialId, generateId } from '../utils/idGenerator.js';
 import { logMaterialCreate, logMaterialUpdate, logMaterialStockUpdate, logMaterialDelete } from '../utils/detailedLogger.js';
 import { escapeRegex } from '../utils/regexHelper.js';
@@ -219,25 +221,31 @@ export const getRawMaterials = async (req, res) => {
 
       // Add consumption breakdown to each material
       materials = materials.map(material => {
-        const breakdown = consumptionMap.get(material.id) || {
-          in_production: 0,
-          reserved: 0,
-          used: 0,
-          sold: 0
-        };
+        // Use reserved_stock from the material model (updated during order creation)
+        const reservedFromModel = material.reserved_stock || 0;
+        const inProductionFromModel = material.in_production || 0;
+        const soldFromModel = material.sold || 0;
+        const usedFromModel = material.used || 0;
 
         // Available stock = current_stock - in_production - reserved
-        const availableStock = Math.max(0, material.current_stock - breakdown.in_production - breakdown.reserved);
+        const availableStock = Math.max(0, material.current_stock - inProductionFromModel - reservedFromModel);
 
-        return {
+        const result = {
           ...material,
           available_stock: availableStock,
-          in_production: breakdown.in_production,
-          reserved: breakdown.reserved,
-          used: breakdown.used,
-          sold: breakdown.sold,
+          in_production: inProductionFromModel,
+          reserved: reservedFromModel,
+          used: usedFromModel,
+          sold: soldFromModel,
           damaged: 0 // Not tracked for raw materials
         };
+
+        // Log for debugging
+        if (reservedFromModel > 0 || soldFromModel > 0) {
+          console.log(`📊 Material: ${material.name} | Current: ${material.current_stock} | Reserved: ${reservedFromModel} | Available: ${availableStock}`);
+        }
+
+        return result;
       });
     }
 
@@ -752,6 +760,71 @@ export const getMaterialDropdownData = async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching material dropdown data:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+// Get orders that use this material
+export const getMaterialOrders = async (req, res) => {
+  try {
+    const materialId = decodeURIComponent(req.params.id);
+
+    // Find the material first to verify it exists
+    let material = await RawMaterial.findOne({ id: materialId });
+    if (!material && materialId.match(/^[0-9a-fA-F]{24}$/)) {
+      material = await RawMaterial.findById(materialId);
+    }
+
+    if (!material) {
+      return res.status(404).json({
+        success: false,
+        error: 'Raw material not found'
+      });
+    }
+
+    // Find all order items that use this material
+    const orderItems = await OrderItem.find({
+      product_type: 'raw_material',
+      $or: [
+        { product_id: material.id },
+        { raw_material_id: material.id }
+      ]
+    });
+
+    // Get unique order IDs
+    const orderIds = [...new Set(orderItems.map(item => item.order_id))];
+
+    // Fetch all orders
+    const orders = await Order.find({ id: { $in: orderIds } }).sort({ created_at: -1 });
+
+    // Build result with order and customer details
+    const result = orders.map(order => {
+      const item = orderItems.find(i => i.order_id === order.id);
+      return {
+        order_id: order.id,
+        order_number: order.order_number,
+        customer_name: order.customer_name,
+        customer_email: order.customer_email,
+        customer_phone: order.customer_phone,
+        quantity: item?.quantity || 0,
+        unit: item?.unit || material.unit,
+        status: order.status,
+        created_at: order.created_at,
+        accepted_at: order.accepted_at,
+        dispatched_at: order.dispatched_at,
+        delivered_at: order.delivered_at,
+      };
+    });
+
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('Error fetching material orders:', error);
     res.status(500).json({
       success: false,
       error: error.message

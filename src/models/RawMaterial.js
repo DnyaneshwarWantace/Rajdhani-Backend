@@ -31,6 +31,21 @@ const rawMaterialSchema = new mongoose.Schema({
     default: 0,
     min: 0
   },
+  in_production: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  sold: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+  used: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
   unit: {
     type: String,
     required: true,
@@ -110,7 +125,17 @@ const rawMaterialSchema = new mongoose.Schema({
   collection: 'raw_materials'
 });
 
-// Timestamps are now using created_at and updated_at directly (no virtuals needed)
+// Virtual field for available_stock
+rawMaterialSchema.virtual('available_stock').get(function() {
+  const reserved = this.reserved_stock || 0;
+  const inProduction = this.in_production || 0;
+  const currentStock = this.current_stock || 0;
+  return Math.max(0, currentStock - reserved - inProduction);
+});
+
+// Ensure virtuals are included in JSON output
+rawMaterialSchema.set('toJSON', { virtuals: true });
+rawMaterialSchema.set('toObject', { virtuals: true });
 
 // Index for better query performance
 rawMaterialSchema.index({ name: 1, supplier_name: 1 });

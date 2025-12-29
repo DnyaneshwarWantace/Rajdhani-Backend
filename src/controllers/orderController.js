@@ -119,6 +119,9 @@ export const createOrder = async (req, res) => {
       for (const itemData of orderData.items) {
         console.log('========== ITEM DATA RECEIVED FROM FRONTEND ==========');
         console.log('Product:', itemData.product_name);
+        console.log('Product Type:', itemData.product_type);
+        console.log('Product ID:', itemData.product_id);
+        console.log('Raw Material ID:', itemData.raw_material_id);
         console.log('Quantity:', itemData.quantity);
         console.log('Unit:', itemData.unit);
         console.log('unit_price from frontend:', itemData.unit_price);
@@ -132,11 +135,25 @@ export const createOrder = async (req, res) => {
         console.log('product_dimensions from frontend:', itemData.product_dimensions);
         console.log('======================================================');
 
+        // Handle raw_material_id - if product_type is raw_material, use product_id as raw_material_id
+        const rawMaterialId = itemData.product_type === 'raw_material'
+          ? (itemData.raw_material_id || itemData.product_id)
+          : null;
+        const productId = itemData.product_type === 'product'
+          ? itemData.product_id
+          : null;
+
+        console.log('🔧 MAPPED IDs:', {
+          productId,
+          rawMaterialId,
+          productType: itemData.product_type
+        });
+
         const orderItem = new OrderItem({
           id: await generateOrderItemId(),
           order_id: order.id,
-          product_id: itemData.product_id || null,
-          raw_material_id: itemData.raw_material_id || null,
+          product_id: productId,
+          raw_material_id: rawMaterialId,
           individual_product_id: itemData.individual_product_id || null,
           product_name: itemData.product_name,
           product_type: itemData.product_type || 'product',
@@ -174,15 +191,40 @@ export const createOrder = async (req, res) => {
         }
 
         // Reserve raw material stock if product_type is 'raw_material'
-        if (itemData.product_type === 'raw_material' && itemData.raw_material_id) {
-          const rawMaterial = await RawMaterial.findOne({ id: itemData.raw_material_id });
+        if (itemData.product_type === 'raw_material' && rawMaterialId) {
+          const rawMaterial = await RawMaterial.findOne({ id: rawMaterialId });
           if (rawMaterial) {
-            const reservedStock = (rawMaterial.reserved_stock || 0) + itemData.quantity;
-            await RawMaterial.findOneAndUpdate(
-              { id: itemData.raw_material_id },
-              { reserved_stock: reservedStock }
+            const currentReserved = rawMaterial.reserved_stock || 0;
+            const currentStock = rawMaterial.current_stock || 0;
+            const newReserved = currentReserved + itemData.quantity;
+            const availableAfter = currentStock - newReserved - (rawMaterial.in_production || 0);
+
+            const updateResult = await RawMaterial.findOneAndUpdate(
+              { id: rawMaterialId },
+              { reserved_stock: newReserved },
+              { new: true }
             );
-            console.log(`✅ Reserved ${itemData.quantity} ${itemData.unit} of ${rawMaterial.name} for order ${order.id}`);
+
+            console.log(`\n🔒 ========== RAW MATERIAL RESERVED ==========`);
+            console.log(`💾 Database Update: ${updateResult ? 'SUCCESS ✅' : 'FAILED ❌'}`);
+            console.log(`📦 Material: ${rawMaterial.name}`);
+            console.log(`📋 Order: ${order.order_number || order.id}`);
+            console.log(`👤 Customer: ${orderData.customer_name || 'N/A'}`);
+            console.log(`📊 Stock Breakdown:`);
+            console.log(`   • Total Stock: ${currentStock} ${itemData.unit}`);
+            console.log(`   • Reserved Before: ${currentReserved} ${itemData.unit}`);
+            console.log(`   • Reserving Now: +${itemData.quantity} ${itemData.unit}`);
+            console.log(`   • Reserved After: ${newReserved} ${itemData.unit}`);
+            console.log(`✅ Available After Reservation: ${availableAfter} ${itemData.unit}`);
+            console.log(`🕐 Time: ${new Date().toLocaleString()}`);
+            console.log(`============================================\n`);
+          } else {
+            console.log(`\n❌ ========== ERROR: CANNOT RESERVE ==========`);
+            console.log(`📦 Material ID: ${rawMaterialId}`);
+            console.log(`📦 Material Name: ${itemData.product_name}`);
+            console.log(`📋 Order: ${order.order_number || order.id}`);
+            console.log(`❌ Material not found in database`);
+            console.log(`============================================\n`);
           }
         }
       }
@@ -232,6 +274,20 @@ export const createOrder = async (req, res) => {
 
     // Fetch the updated order with final values
     const finalOrder = await Order.findOne({ id: order.id });
+
+    // Log summary of raw materials reserved in this order
+    const rawMaterialItems = (orderData.items || []).filter(item => item.product_type === 'raw_material');
+    if (rawMaterialItems.length > 0) {
+      console.log(`\n📦 ========== ORDER CREATION SUMMARY ==========`);
+      console.log(`📋 Order: ${finalOrder.order_number}`);
+      console.log(`👤 Customer: ${finalOrder.customer_name}`);
+      console.log(`📊 Raw Materials Reserved: ${rawMaterialItems.length}`);
+      rawMaterialItems.forEach((item, index) => {
+        console.log(`   ${index + 1}. ${item.product_name}: ${item.quantity} ${item.unit}`);
+      });
+      console.log(`🕐 Time: ${new Date().toLocaleString()}`);
+      console.log(`============================================\n`);
+    }
 
     // Add activity log for order creation
     await addActivityLog(
@@ -663,15 +719,15 @@ export const updateOrder = async (req, res) => {
     });
 
     Object.assign(order, updateData);
-    
-    // If status changed to dispatched or delivered, trigger stock deduction
-    if ((updateData.status === 'dispatched' || updateData.status === 'delivered') && oldStatus !== updateData.status) {
-      console.log(`🚀 Status changed to ${updateData.status}, triggering stock deduction for order: ${order.id}`);
+
+    // If status changed to dispatched, trigger stock deduction (mark reserved as sold)
+    if (updateData.status === 'dispatched' && oldStatus !== 'dispatched') {
+      console.log(`🚀 Status changed to dispatched, marking stock as sold for order: ${order.id}`);
       try {
         await markIndividualProductsAsSold(order.id);
-        console.log(`✅ Stock deduction completed for order: ${order.id}`);
+        console.log(`✅ Stock marked as sold for order: ${order.id}`);
       } catch (error) {
-        console.error(`❌ Error in stock deduction for order ${order.id}:`, error);
+        console.error(`❌ Error marking stock as sold for order ${order.id}:`, error);
       }
     }
 
@@ -793,17 +849,28 @@ export const updateOrderStatus = async (req, res) => {
         order.workflow_step = 'delivered';
         // Mark individual products as sold when dispatched
         try {
-          console.log(`🚀 About to call markIndividualProductsAsSold for order: ${order.id}`);
+          console.log(`\n🚚 ========== ORDER DISPATCHED ==========`);
+          console.log(`📋 Order: ${order.order_number || order.id}`);
+          console.log(`🔄 Status: ${oldStatus} → dispatched`);
+          console.log(`🚀 Processing stock deduction for raw materials...`);
+          console.log(`==========================================\n`);
+
           await markIndividualProductsAsSold(order.id);
-          console.log(`✅ markIndividualProductsAsSold completed for order: ${order.id}`);
+
+          console.log(`\n✅ ========== DISPATCH COMPLETED ==========`);
+          console.log(`📋 Order: ${order.order_number || order.id}`);
+          console.log(`✅ All raw materials marked as sold`);
+          console.log(`==========================================\n`);
         } catch (error) {
-          console.error(`❌ Error in markIndividualProductsAsSold for order ${order.id}:`, error);
+          console.error(`\n❌ ========== ERROR IN DISPATCH ==========`);
+          console.error(`📋 Order: ${order.id}`);
+          console.error(`❌ Error:`, error);
+          console.error(`==========================================\n`);
         }
         break;
       case 'delivered':
         order.delivered_at = now;
-        // Also trigger stock deduction if not already done
-        await markIndividualProductsAsSold(order.id);
+        // No stock deduction needed - stock was already marked as sold when dispatched
         break;
       case 'cancelled':
         // Release all reserved stock when order is cancelled
@@ -1272,30 +1339,63 @@ const markIndividualProductsAsSold = async (orderId) => {
           }
         }
       } else if (item.product_type === 'raw_material') {
-        // Handle raw material stock deduction
+        // Handle raw material stock deduction - move from reserved to sold
         console.log(`🔍 Looking for raw material with ID: ${item.product_id}, Name: ${item.product_name}`);
-        
+
         let rawMaterial;
         if (item.product_id) {
           // Try to find by ID first
           rawMaterial = await RawMaterial.findOne({ id: item.product_id });
         }
-        
+
+        if (!rawMaterial && item.raw_material_id) {
+          // Try with raw_material_id field
+          rawMaterial = await RawMaterial.findOne({ id: item.raw_material_id });
+        }
+
         if (!rawMaterial && item.product_name) {
           // If not found by ID, try to find by name
           rawMaterial = await RawMaterial.findOne({ name: item.product_name });
           console.log(`🔍 Found raw material by name: ${rawMaterial ? rawMaterial.id : 'Not found'}`);
         }
-        
+
         if (rawMaterial) {
-          const newStock = Math.max(0, (rawMaterial.current_stock || 0) - item.quantity);
+          // Move stock from reserved to sold
+          // Decrease reserved_stock and current_stock, increase sold
+          const currentReserved = rawMaterial.reserved_stock || 0;
+          const currentSold = rawMaterial.sold || 0;
+          const currentStock = rawMaterial.current_stock || 0;
+
+          const newReserved = Math.max(0, currentReserved - item.quantity);
+          const newSold = currentSold + item.quantity;
+          const newStock = Math.max(0, currentStock - item.quantity);
+
           await RawMaterial.findOneAndUpdate(
             { id: rawMaterial.id },
-            { current_stock: newStock }
+            {
+              reserved_stock: newReserved,
+              sold: newSold,
+              current_stock: newStock
+            }
           );
-          console.log(`✅ Deducted ${item.quantity} from raw material ${rawMaterial.name} stock (new stock: ${newStock})`);
+
+          console.log(`\n💰 ========== RAW MATERIAL MARKED AS SOLD ==========`);
+          console.log(`📦 Material: ${rawMaterial.name}`);
+          console.log(`📋 Order ID: ${orderId}`);
+          console.log(`📊 Stock Changes:`);
+          console.log(`   • Reserved: ${currentReserved} ${item.unit} → ${newReserved} ${item.unit} (-${item.quantity})`);
+          console.log(`   • Sold: ${currentSold} ${item.unit} → ${newSold} ${item.unit} (+${item.quantity})`);
+          console.log(`   • Total Stock: ${currentStock} ${item.unit} → ${newStock} ${item.unit} (-${item.quantity})`);
+          console.log(`✅ Available Stock: ${Math.max(0, newStock - newReserved - (rawMaterial.in_production || 0))} ${item.unit}`);
+          console.log(`🕐 Time: ${new Date().toLocaleString()}`);
+          console.log(`===================================================\n`);
         } else {
-          console.log(`❌ Raw material not found with ID: ${item.product_id} or Name: ${item.product_name}`);
+          console.log(`\n❌ ========== ERROR: RAW MATERIAL NOT FOUND ==========`);
+          console.log(`📦 Material ID: ${item.product_id}`);
+          console.log(`📦 Material Name: ${item.product_name}`);
+          console.log(`📋 Order ID: ${orderId}`);
+          console.log(`🕐 Time: ${new Date().toLocaleString()}`);
+          console.log(`======================================================\n`);
         }
       }
     }
