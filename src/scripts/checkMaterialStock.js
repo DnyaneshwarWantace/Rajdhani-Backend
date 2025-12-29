@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import RawMaterial from '../models/RawMaterial.js';
+import MaterialConsumption from '../models/MaterialConsumption.js';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -8,8 +9,26 @@ import { dirname, join } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Load environment variables from backend directory
-dotenv.config({ path: join(__dirname, '../../.env') });
+// Load environment variables - try multiple paths
+const envPaths = [
+  join(__dirname, '../../.env'),
+  join(__dirname, '../../../.env'),
+  '.env'
+];
+
+let envLoaded = false;
+for (const envPath of envPaths) {
+  const result = dotenv.config({ path: envPath });
+  if (!result.error) {
+    envLoaded = true;
+    console.log(`📄 Loaded .env from: ${envPath}`);
+    break;
+  }
+}
+
+if (!envLoaded) {
+  console.warn('⚠️  Warning: .env file not found. Using environment variables from system.');
+}
 
 const checkMaterialStock = async (materialId) => {
   try {
@@ -28,12 +47,48 @@ const checkMaterialStock = async (materialId) => {
       return;
     }
 
-    // Calculate available stock
-    const reserved = material.reserved_stock || 0;
-    const inProduction = material.in_production || 0;
+    // Get stock from RawMaterial model (direct fields)
     const currentStock = material.current_stock || 0;
-    const used = material.used || 0;
-    const sold = material.sold || 0;
+    const reservedFromModel = material.reserved_stock || 0;
+    const inProductionFromModel = material.in_production || 0;
+    const usedFromModel = material.used || 0;
+    const soldFromModel = material.sold || 0;
+
+    // Get actual consumption breakdown from MaterialConsumption records
+    const consumptionData = await MaterialConsumption.aggregate([
+      {
+        $match: {
+          material_id: materialId,
+          material_type: 'raw_material',
+          status: 'active'
+        }
+      },
+      {
+        $group: {
+          _id: '$consumption_status',
+          total: { $sum: '$quantity_used' }
+        }
+      }
+    ]);
+
+    // Build breakdown from consumption records
+    const breakdown = {
+      in_production: 0,
+      reserved: 0,
+      used: 0,
+      sold: 0
+    };
+
+    consumptionData.forEach(item => {
+      const status = item._id || 'in_production';
+      breakdown[status] = item.total || 0;
+    });
+
+    // Use consumption records for accurate calculation (matches UI)
+    const reserved = breakdown.reserved;
+    const inProduction = breakdown.in_production;
+    const used = breakdown.used;
+    const sold = breakdown.sold;
     const availableStock = Math.max(0, currentStock - reserved - inProduction);
 
     // Display results
@@ -47,7 +102,7 @@ const checkMaterialStock = async (materialId) => {
     console.log(`Unit:            ${material.unit}`);
     console.log(`Status:          ${material.status}`);
     console.log('');
-    console.log('📊 STOCK BREAKDOWN:');
+    console.log('📊 STOCK BREAKDOWN (from MaterialConsumption records):');
     console.log('───────────────────────────────────────────────────────────');
     console.log(`Current Stock:   ${currentStock.toLocaleString()} ${material.unit}`);
     console.log(`Reserved:        ${reserved.toLocaleString()} ${material.unit}`);
@@ -56,6 +111,19 @@ const checkMaterialStock = async (materialId) => {
     console.log(`Sold:            ${sold.toLocaleString()} ${material.unit}`);
     console.log('');
     console.log(`✅ Available Stock: ${availableStock.toLocaleString()} ${material.unit}`);
+    console.log('───────────────────────────────────────────────────────────');
+    console.log('');
+    console.log('📋 RAW MATERIAL MODEL FIELDS (for reference):');
+    console.log('───────────────────────────────────────────────────────────');
+    console.log(`reserved_stock:  ${reservedFromModel.toLocaleString()} ${material.unit}`);
+    console.log(`in_production:   ${inProductionFromModel.toLocaleString()} ${material.unit}`);
+    console.log(`used:            ${usedFromModel.toLocaleString()} ${material.unit}`);
+    console.log(`sold:            ${soldFromModel.toLocaleString()} ${material.unit}`);
+    if (reservedFromModel !== reserved || inProductionFromModel !== inProduction) {
+      console.log('');
+      console.log('⚠️  NOTE: Model fields differ from consumption records!');
+      console.log('   The UI uses MaterialConsumption records for accurate tracking.');
+    }
     console.log('───────────────────────────────────────────────────────────');
     console.log('');
     console.log('💰 FINANCIAL INFORMATION:');

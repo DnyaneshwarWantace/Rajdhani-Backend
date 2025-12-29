@@ -221,28 +221,36 @@ export const getRawMaterials = async (req, res) => {
 
       // Add consumption breakdown to each material
       materials = materials.map(material => {
-        // Use reserved_stock from the material model (updated during order creation)
+        // Get reserved_stock from the material model (updated during order creation)
         const reservedFromModel = material.reserved_stock || 0;
-        const inProductionFromModel = material.in_production || 0;
-        const soldFromModel = material.sold || 0;
-        const usedFromModel = material.used || 0;
+        
+        // Get in_production, used, sold from MaterialConsumption records (production only)
+        const inProductionFromConsumption = consumptionMap.get(material.id)?.in_production || 0;
+        const usedFromConsumption = consumptionMap.get(material.id)?.used || 0;
+        const soldFromConsumption = consumptionMap.get(material.id)?.sold || 0;
+        
+        // Combine: reserved comes from model (orders), in_production/used/sold come from consumption (production)
+        const totalInProduction = inProductionFromConsumption;
+        const totalReserved = reservedFromModel; // From orders
+        const totalUsed = usedFromConsumption;
+        const totalSold = soldFromConsumption;
 
-        // Available stock = current_stock - in_production - reserved
-        const availableStock = Math.max(0, material.current_stock - inProductionFromModel - reservedFromModel);
+        // Available stock = current_stock - in_production (from production) - reserved (from orders)
+        const availableStock = Math.max(0, material.current_stock - totalInProduction - totalReserved);
 
         const result = {
           ...material,
           available_stock: availableStock,
-          in_production: inProductionFromModel,
-          reserved: reservedFromModel,
-          used: usedFromModel,
-          sold: soldFromModel,
+          in_production: totalInProduction,
+          reserved: totalReserved, // From orders (reserved_stock field)
+          used: totalUsed,
+          sold: totalSold,
           damaged: 0 // Not tracked for raw materials
         };
 
         // Log for debugging
-        if (reservedFromModel > 0 || soldFromModel > 0) {
-          console.log(`📊 Material: ${material.name} | Current: ${material.current_stock} | Reserved: ${reservedFromModel} | Available: ${availableStock}`);
+        if (totalReserved > 0 || totalSold > 0 || totalInProduction > 0) {
+          console.log(`📊 Material: ${material.name} | Current: ${material.current_stock} | Reserved (orders): ${totalReserved} | In Production: ${totalInProduction} | Available: ${availableStock}`);
         }
 
         return result;
@@ -328,14 +336,17 @@ export const getRawMaterialById = async (req, res) => {
         breakdown[status] = item.total;
       });
 
-      // Available stock = current_stock - in_production - reserved
-      const availableStock = Math.max(0, material.current_stock - breakdown.in_production - breakdown.reserved);
+      // Get reserved_stock from model (from orders), not from MaterialConsumption
+      const reservedFromModel = material.reserved_stock || 0;
+      
+      // Available stock = current_stock - in_production (from production) - reserved (from orders)
+      const availableStock = Math.max(0, material.current_stock - breakdown.in_production - reservedFromModel);
 
       materialData = {
         ...materialData,
         available_stock: availableStock,
-        in_production: breakdown.in_production,
-        reserved: breakdown.reserved,
+        in_production: breakdown.in_production, // From production only
+        reserved: reservedFromModel, // From orders (reserved_stock field)
         used: breakdown.used,
         sold: breakdown.sold,
         damaged: 0 // Not tracked for raw materials

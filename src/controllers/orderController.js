@@ -190,43 +190,8 @@ export const createOrder = async (req, res) => {
           console.log(`✅ Reserved ${individualProductIds.length} individual products for order ${order.id}`);
         }
 
-        // Reserve raw material stock if product_type is 'raw_material'
-        if (itemData.product_type === 'raw_material' && rawMaterialId) {
-          const rawMaterial = await RawMaterial.findOne({ id: rawMaterialId });
-          if (rawMaterial) {
-            const currentReserved = rawMaterial.reserved_stock || 0;
-            const currentStock = rawMaterial.current_stock || 0;
-            const newReserved = currentReserved + itemData.quantity;
-            const availableAfter = currentStock - newReserved - (rawMaterial.in_production || 0);
-
-            const updateResult = await RawMaterial.findOneAndUpdate(
-              { id: rawMaterialId },
-              { reserved_stock: newReserved },
-              { new: true }
-            );
-
-            console.log(`\n🔒 ========== RAW MATERIAL RESERVED ==========`);
-            console.log(`💾 Database Update: ${updateResult ? 'SUCCESS ✅' : 'FAILED ❌'}`);
-            console.log(`📦 Material: ${rawMaterial.name}`);
-            console.log(`📋 Order: ${order.order_number || order.id}`);
-            console.log(`👤 Customer: ${orderData.customer_name || 'N/A'}`);
-            console.log(`📊 Stock Breakdown:`);
-            console.log(`   • Total Stock: ${currentStock} ${itemData.unit}`);
-            console.log(`   • Reserved Before: ${currentReserved} ${itemData.unit}`);
-            console.log(`   • Reserving Now: +${itemData.quantity} ${itemData.unit}`);
-            console.log(`   • Reserved After: ${newReserved} ${itemData.unit}`);
-            console.log(`✅ Available After Reservation: ${availableAfter} ${itemData.unit}`);
-            console.log(`🕐 Time: ${new Date().toLocaleString()}`);
-            console.log(`============================================\n`);
-          } else {
-            console.log(`\n❌ ========== ERROR: CANNOT RESERVE ==========`);
-            console.log(`📦 Material ID: ${rawMaterialId}`);
-            console.log(`📦 Material Name: ${itemData.product_name}`);
-            console.log(`📋 Order: ${order.order_number || order.id}`);
-            console.log(`❌ Material not found in database`);
-            console.log(`============================================\n`);
-          }
-        }
+        // Note: Raw materials are NOT reserved when order is created (pending)
+        // They will be reserved when order status changes to 'accepted' (similar to individual products)
       }
 
       // Calculate order totals from items (items already have GST included in total_price from frontend)
@@ -843,6 +808,52 @@ export const updateOrderStatus = async (req, res) => {
       case 'accepted':
         order.accepted_at = now;
         order.workflow_step = 'dispatch';
+        
+        // Reserve raw material stock when order is accepted (similar to individual products)
+        try {
+          console.log(`\n🔒 ========== RESERVING RAW MATERIALS ==========`);
+          console.log(`📋 Order: ${order.order_number || order.id}`);
+          console.log(`🔄 Status: ${oldStatus} → accepted`);
+          console.log(`🚀 Reserving raw materials for accepted order...`);
+          console.log(`==========================================\n`);
+
+          const orderItems = await OrderItem.find({ order_id: order.id });
+          
+          for (const item of orderItems) {
+            if (item.product_type === 'raw_material' && item.raw_material_id) {
+              const rawMaterial = await RawMaterial.findOne({ id: item.raw_material_id });
+              
+              if (rawMaterial) {
+                const currentReserved = rawMaterial.reserved_stock || 0;
+                const currentStock = rawMaterial.current_stock || 0;
+                const newReserved = currentReserved + item.quantity;
+                const availableAfter = currentStock - newReserved - (rawMaterial.in_production || 0);
+
+                const updateResult = await RawMaterial.findOneAndUpdate(
+                  { id: item.raw_material_id },
+                  { reserved_stock: newReserved },
+                  { new: true }
+                );
+
+                console.log(`✅ Reserved ${item.quantity} ${item.unit} of ${rawMaterial.name}`);
+                console.log(`   Reserved: ${currentReserved} → ${newReserved} ${item.unit}`);
+                console.log(`   Available: ${availableAfter} ${item.unit}`);
+              } else {
+                console.log(`⚠️  Material not found: ${item.raw_material_id}`);
+              }
+            }
+          }
+
+          console.log(`\n✅ ========== RESERVATION COMPLETED ==========`);
+          console.log(`📋 Order: ${order.order_number || order.id}`);
+          console.log(`✅ All raw materials reserved`);
+          console.log(`==========================================\n`);
+        } catch (error) {
+          console.error(`\n❌ ========== ERROR RESERVING MATERIALS ==========`);
+          console.error(`📋 Order: ${order.id}`);
+          console.error(`❌ Error:`, error);
+          console.error(`==========================================\n`);
+        }
         break;
       case 'dispatched':
         order.dispatched_at = now;
