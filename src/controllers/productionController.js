@@ -13,7 +13,10 @@ import {
   logProductionMachineAssign,
   logProductionStepComplete,
   logProductionWastageAdd,
-  logProductionComplete
+  logProductionComplete,
+  logProductionRecipeUpdate,
+  logProductionIndividualProductSelection,
+  logProductionRawMaterialSelection
 } from '../utils/detailedLogger.js';
 
 // NOTE: For backward-compatibility with previous endpoints, the "productions"

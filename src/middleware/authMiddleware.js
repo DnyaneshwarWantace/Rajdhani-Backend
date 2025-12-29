@@ -129,7 +129,7 @@ const checkPageAccess = (page) => {
   return async (req, res, next) => {
     try {
       console.log(`🔍 checkPageAccess called for page: ${page}, path: ${req.path}`);
-      
+
       if (!req.user) {
         console.log(`❌ No user found for ${page} page`);
         return res.status(401).json({

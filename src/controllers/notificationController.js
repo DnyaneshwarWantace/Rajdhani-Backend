@@ -1,4 +1,5 @@
 import Notification from '../models/Notification.js';
+import ActivityLog from '../models/ActivityLog.js';
 import { generateId } from '../utils/idGenerator.js';
 
 // Create a new notification
@@ -52,24 +53,87 @@ const createNotification = async (req, res) => {
 // Get all notifications
 const getNotifications = async (req, res) => {
   try {
-    const { module, status, type, limit = 50, offset = 0 } = req.query;
-    
+    const { module, status, type, limit = 1000, offset = 0 } = req.query;
+
     let query = {};
-    
+
     if (module) query.module = module;
     if (status) query.status = status;
     if (type) query.type = type;
 
+    // Fetch regular notifications
     const notifications = await Notification.find(query)
       .sort({ created_at: -1 })
       .limit(parseInt(limit))
-      .skip(parseInt(offset));
+      .skip(parseInt(offset))
+      .lean();
 
-    const total = await Notification.countDocuments(query);
+    // Fetch activity logs and convert them to notification format
+    const activityLogs = await ActivityLog.find({})
+      .sort({ created_at: -1 })
+      .limit(parseInt(limit))
+      .lean();
+
+    // Convert activity logs to notification format
+    const activityNotifications = activityLogs.map(log => {
+      // Map action category to module
+      let notificationModule = 'production';
+      if (log.action_category === 'MATERIAL' || log.action_category === 'PURCHASE_ORDER') {
+        notificationModule = 'materials';
+      } else if (log.action_category === 'PRODUCT') {
+        notificationModule = 'products';
+      } else if (log.action_category === 'ORDER') {
+        notificationModule = 'orders';
+      } else if (log.action_category === 'PRODUCTION' || log.action_category === 'RECIPE') {
+        notificationModule = 'production';
+      }
+
+      return {
+        id: `activity_${log._id}`,
+        type: 'activity_log',
+        title: log.description || `${log.action} - ${log.action_category}`,
+        message: log.description || '',
+        priority: 'medium',
+        status: 'read', // Activity logs are marked as read by default
+        module: notificationModule,
+        related_id: log.target_resource || log._id.toString(),
+        related_data: {
+          activity_log_id: log._id,
+          action: log.action,
+          action_category: log.action_category,
+          description: log.description,
+          user_name: log.user_name,
+          user_email: log.user_email,
+          user_role: log.user_role,
+          metadata: log.metadata,
+          changes: log.changes,
+          target_resource: log.target_resource,
+          target_resource_type: log.target_resource_type,
+          method: log.method,
+          endpoint: log.endpoint,
+          status_code: log.status_code,
+          created_at: log.created_at,
+          created_by_user: log.user_name
+        },
+        created_by: log.user_name || 'System',
+        created_at: log.created_at,
+        updated_at: log.created_at
+      };
+    });
+
+    // Combine both arrays
+    const allNotifications = [...notifications, ...activityNotifications];
+
+    // Sort combined array by created_at
+    allNotifications.sort((a, b) =>
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    const total = await Notification.countDocuments(query) + activityLogs.length;
 
     res.json({
       success: true,
-      data: notifications,
+      data: allNotifications,
       total,
       limit: parseInt(limit),
       offset: parseInt(offset)

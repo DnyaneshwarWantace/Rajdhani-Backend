@@ -4,9 +4,58 @@ import Customer from '../models/Customer.js';
 import Product from '../models/Product.js';
 import IndividualProduct from '../models/IndividualProduct.js';
 import RawMaterial from '../models/RawMaterial.js';
+import Notification from '../models/Notification.js';
 import { generateOrderId, generateOrderNumber, generateOrderItemId } from '../utils/idGenerator.js';
 import { logOrderCreate, logOrderUpdate, logOrderStatusChange, logOrderDelete } from '../utils/detailedLogger.js';
 import { escapeRegex } from '../utils/regexHelper.js';
+
+// Helper function to create notifications
+const createNotification = async (data) => {
+  try {
+    const notificationId = `NOT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    console.log('🔍 createNotification - related_data.created_by_user:', data.details?.created_by_user);
+
+    const notification = new Notification({
+      id: notificationId,
+      type: data.type || 'info',
+      title: data.title,
+      message: data.message,
+      priority: data.priority || 'medium',
+      status: 'unread',
+      module: data.module || 'orders',  // ✅ Use data.module if provided, default to 'orders'
+      related_id: data.related_id,
+      related_data: data.details || {},
+      user_id: data.user_id,
+      created_by: data.user_id,  // ✅ Add created_by field
+      created_at: new Date(),
+      updated_at: new Date()
+    });
+    await notification.save();
+    console.log(`🔔 Notification created: ${data.title} | Module: ${notification.module} | Type: ${notification.type} | created_by_user: ${notification.related_data?.created_by_user}`);
+  } catch (error) {
+    console.error('Error creating notification:', error);
+  }
+};
+
+// Helper function to add activity log to order
+const addActivityLog = async (order, action, description, user, details = {}) => {
+  const log = {
+    action,
+    description,
+    performed_by: user?.full_name || user?.email || 'System',
+    performed_by_email: user?.email || 'system@rajdhani.com',
+    timestamp: new Date(),
+    details
+  };
+
+  if (!order.activity_logs) {
+    order.activity_logs = [];
+  }
+  order.activity_logs.push(log);
+
+  console.log(`📝 Activity Log: ${action} by ${log.performed_by}`);
+};
 
 // Create a new order
 export const createOrder = async (req, res) => {
@@ -14,7 +63,8 @@ export const createOrder = async (req, res) => {
     const orderData = {
       ...req.body,
       id: await generateOrderId(),
-      order_number: await generateOrderNumber()
+      order_number: await generateOrderNumber(),
+      created_by: req.user?.id || req.user?.email || 'system' // Set from authenticated user or default to 'system'
     };
 
     // Validate customer exists
@@ -47,6 +97,21 @@ export const createOrder = async (req, res) => {
     }
 
     const order = new Order(orderData);
+
+    // Add activity log for order creation
+    await addActivityLog(
+      order,
+      'order_created',
+      `Order ${order.order_number} created for customer ${order.customer_name}`,
+      req.user,
+      {
+        order_number: order.order_number,
+        customer_name: order.customer_name,
+        total_amount: order.total_amount,
+        items_count: orderData.items?.length || 0
+      }
+    );
+
     await order.save();
 
     // Create order items if provided
@@ -59,6 +124,9 @@ export const createOrder = async (req, res) => {
         console.log('unit_price from frontend:', itemData.unit_price);
         console.log('gst_rate from frontend:', itemData.gst_rate);
         console.log('gst_included from frontend:', itemData.gst_included);
+        console.log('subtotal from frontend:', itemData.subtotal);
+        console.log('gst_amount from frontend:', itemData.gst_amount);
+        console.log('total_price from frontend:', itemData.total_price);
         console.log('pricing_unit from frontend:', itemData.pricing_unit);
         console.log('unit_value from frontend:', itemData.unit_value);
         console.log('product_dimensions from frontend:', itemData.product_dimensions);
@@ -78,10 +146,10 @@ export const createOrder = async (req, res) => {
           // Per-item GST fields
           gst_rate: itemData.gst_rate ? itemData.gst_rate.toString() : "18.00",
           gst_included: itemData.gst_included !== undefined ? itemData.gst_included : true,
-          // Pre-save middleware will calculate subtotal, gst_amount, and total_price
-          subtotal: "0.00", // Will be calculated
-          gst_amount: "0.00", // Will be calculated
-          total_price: "0.00", // Will be calculated
+          // Accept frontend-calculated prices (frontend already calculated based on pricing unit)
+          subtotal: itemData.subtotal ? itemData.subtotal.toString() : "0.00",
+          gst_amount: itemData.gst_amount ? itemData.gst_amount.toString() : "0.00",
+          total_price: itemData.total_price ? itemData.total_price.toString() : "0.00",
           quality_grade: itemData.quality_grade || 'A',
           specifications: itemData.specifications || null,
           selected_individual_products: itemData.selected_individual_products || [],
@@ -119,32 +187,28 @@ export const createOrder = async (req, res) => {
         }
       }
 
-      // Recalculate order totals after creating items
+      // Calculate order totals from items (items already have GST included in total_price from frontend)
       const items = await OrderItem.find({ order_id: order.id });
-      const subtotal = items.reduce((sum, item) => sum + parseFloat(item.total_price), 0);
-      const gstRate = parseFloat(order.gst_rate) || 18;
+
+      // Sum up all item total prices (already includes GST calculated by frontend based on pricing unit)
+      const totalAmount = items.reduce((sum, item) => sum + parseFloat(item.total_price || 0), 0);
+
       const discountAmount = parseFloat(order.discount_amount) || 0;
       const paidAmount = parseFloat(order.paid_amount) || 0;
-      
-      // Calculate GST amount based on whether GST is included
-      let gstAmount = 0;
-      if (order.gst_included) {
-        gstAmount = (subtotal * gstRate) / 100;
-      }
-      
-      // Calculate total amount
-      const totalAmount = subtotal + gstAmount - discountAmount;
-      
+
+      // Calculate final total with discount
+      const finalTotal = totalAmount - discountAmount;
+
       // Calculate outstanding amount
-      const outstandingAmount = totalAmount - paidAmount;
-      
+      const outstandingAmount = finalTotal - paidAmount;
+
       // Update order with calculated values
       await Order.findOneAndUpdate(
         { id: order.id },
         {
-          subtotal: subtotal.toFixed(2),
-          gst_amount: gstAmount.toFixed(2),
-          total_amount: totalAmount.toFixed(2),
+          subtotal: totalAmount.toFixed(2),
+          gst_amount: '0.00', // GST already included in item total_price
+          total_amount: finalTotal.toFixed(2),
           outstanding_amount: outstandingAmount.toFixed(2)
         }
       );
@@ -169,8 +233,213 @@ export const createOrder = async (req, res) => {
     // Fetch the updated order with final values
     const finalOrder = await Order.findOne({ id: order.id });
 
+    // Add activity log for order creation
+    await addActivityLog(
+      finalOrder,
+      'order_created',
+      `Order ${finalOrder.order_number} created for ${finalOrder.customer_name} with ${orderData.items?.length || 0} items`,
+      req.user,
+      {
+        order_number: finalOrder.order_number,
+        customer_name: finalOrder.customer_name,
+        total_amount: finalOrder.total_amount,
+        items_count: orderData.items?.length || 0,
+        status: finalOrder.status
+      }
+    );
+    await finalOrder.save();
+
     // Log order creation with details
     await logOrderCreate(req, finalOrder);
+
+    // Create detailed notifications for each product and material in the order
+    for (const itemData of orderData.items || []) {
+      const isProduct = itemData.product_type === 'product';
+      const isMaterial = itemData.product_type === 'raw_material';
+
+      // Build detailed item information
+      let itemDetails = {
+        name: itemData.product_name,
+        quantity: itemData.quantity,
+        unit: itemData.unit,
+        unit_price: parseFloat(itemData.unit_price || 0),
+        total_price: parseFloat(itemData.total_price || 0),
+        pricing_unit: itemData.pricing_unit,
+        unit_value: itemData.unit_value
+      };
+
+      // Get additional product/material details from database
+      if (isProduct && itemData.product_id) {
+        const product = await Product.findOne({ id: itemData.product_id });
+        if (product) {
+          itemDetails = {
+            ...itemDetails,
+            color: product.color,
+            pattern: product.pattern,
+            category: product.category,
+            subcategory: product.subcategory,
+            width: product.width,
+            length: product.length,
+            weight: product.weight,
+            width_unit: product.width_unit,
+            length_unit: product.length_unit,
+            weight_unit: product.weight_unit,
+            sqm_per_piece: product.sqm_per_piece,
+            current_stock: product.current_stock
+          };
+        }
+      } else if (isMaterial && itemData.raw_material_id) {
+        const material = await RawMaterial.findOne({ id: itemData.raw_material_id });
+        if (material) {
+          itemDetails = {
+            ...itemDetails,
+            color: material.color,
+            category: material.category,
+            subcategory: material.subcategory,
+            supplier: material.supplier,
+            width: material.width,
+            length: material.length,
+            weight: material.weight,
+            width_unit: material.width_unit,
+            length_unit: material.length_unit,
+            weight_unit: material.weight_unit,
+            current_stock: material.current_stock
+          };
+        }
+      }
+
+      // Create notification for products
+      if (isProduct) {
+        // Get product details to check stock
+        const product = await Product.findOne({ id: itemData.product_id });
+        const availableStock = product?.current_stock || 0;
+        const requiredQuantity = itemData.quantity;
+        const shortfall = Math.max(0, requiredQuantity - availableStock);
+        const isStockInsufficient = availableStock < requiredQuantity;
+
+        console.log('🔍 Creating notification with user data:', {
+          user_id: req.user?.id,
+          email: req.user?.email,
+          full_name: req.user?.full_name,
+          role: req.user?.role
+        });
+
+        await createNotification({
+          type: isStockInsufficient ? 'production_request' : 'order_alert',
+          title: isStockInsufficient
+            ? `Product Stock Alert - ${itemData.product_name}`
+            : `Order ${finalOrder.order_number} - ${itemData.product_name}`,
+          message: isStockInsufficient
+            ? `Order ${finalOrder.order_number} requires ${requiredQuantity} ${itemData.unit} of ${itemData.product_name}. Current stock: ${availableStock} ${itemData.unit}. Need to produce ${shortfall} more ${itemData.unit}.`
+            : `New order from ${finalOrder.customer_name} requires ${requiredQuantity} ${itemData.unit} of ${itemData.product_name}. Price: ₹${parseFloat(itemData.total_price || 0).toLocaleString()}`,
+          user_id: req.user?.id || req.user?.email,
+          related_id: itemData.product_id,
+          module: 'products',
+          priority: isStockInsufficient ? 'high' : (itemData.quantity > 10 ? 'high' : 'medium'),
+          details: {
+            order_id: finalOrder.id,
+            order_number: finalOrder.order_number,
+            customer_name: finalOrder.customer_name,
+            customer_email: finalOrder.customer_email,
+            customer_phone: finalOrder.customer_phone,
+            order_date: finalOrder.order_date,
+            expected_delivery: finalOrder.expected_delivery,
+            product_id: itemData.product_id,
+            product_name: itemData.product_name,
+            product_details: itemDetails,
+            quantity_ordered: requiredQuantity,
+            available_stock: availableStock,
+            shortfall: shortfall,
+            unit: itemData.unit,
+            quality_grade: itemData.quality_grade,
+            specifications: itemData.specifications,
+            pricing_unit: itemData.pricing_unit,
+            unit_value: itemData.unit_value,
+            unit_price: parseFloat(itemData.unit_price || 0),
+            gst_rate: parseFloat(itemData.gst_rate || '18'),
+            gst_included: itemData.gst_included,
+            subtotal: parseFloat(itemData.subtotal || '0'),
+            gst_amount: parseFloat(itemData.gst_amount || '0'),
+            total_price: parseFloat(itemData.total_price || '0'),
+            selected_individual_products: itemData.selected_individual_products || [],
+            created_by_user: req.user?.full_name || req.user?.email || 'Unknown User'
+          }
+        });
+      }
+
+      // Create notification for materials
+      if (isMaterial) {
+        // Get material details to check stock
+        const material = await RawMaterial.findOne({ id: itemData.raw_material_id || itemData.product_id });
+        const availableStock = material?.current_stock || 0;
+        const requiredQuantity = itemData.quantity;
+        const shortfall = Math.max(0, requiredQuantity - availableStock);
+        const isStockInsufficient = availableStock < requiredQuantity;
+
+        await createNotification({
+          type: isStockInsufficient ? 'restock_request' : 'order_alert',
+          title: isStockInsufficient
+            ? `Raw Material Stock Alert - ${itemData.product_name}`
+            : `Order ${finalOrder.order_number} - ${itemData.product_name}`,
+          message: isStockInsufficient
+            ? `Order ${finalOrder.order_number} requires ${requiredQuantity} ${itemData.unit} of ${itemData.product_name}. Current stock: ${availableStock} ${itemData.unit}. Need to restock ${shortfall} more ${itemData.unit}.`
+            : `New order from ${finalOrder.customer_name} requires ${requiredQuantity} ${itemData.unit} of ${itemData.product_name}. Price: ₹${parseFloat(itemData.total_price || 0).toLocaleString()}`,
+          user_id: req.user?.id || req.user?.email,
+          related_id: itemData.raw_material_id || itemData.product_id,
+          module: 'materials',
+          priority: isStockInsufficient ? 'high' : (itemData.quantity > 100 ? 'high' : 'medium'),
+          details: {
+            order_id: finalOrder.id,
+            order_number: finalOrder.order_number,
+            customer_name: finalOrder.customer_name,
+            customer_email: finalOrder.customer_email,
+            customer_phone: finalOrder.customer_phone,
+            order_date: finalOrder.order_date,
+            expected_delivery: finalOrder.expected_delivery,
+            material_id: itemData.raw_material_id || itemData.product_id,
+            material_name: itemData.product_name,
+            material_details: itemDetails,
+            quantity_ordered: requiredQuantity,
+            available_stock: availableStock,
+            shortfall: shortfall,
+            unit: itemData.unit,
+            specifications: itemData.specifications,
+            pricing_unit: itemData.pricing_unit,
+            unit_value: itemData.unit_value,
+            unit_price: parseFloat(itemData.unit_price || 0),
+            gst_rate: parseFloat(itemData.gst_rate || '18'),
+            created_by_user: req.user?.full_name || req.user?.email || 'Unknown User',
+            gst_included: itemData.gst_included,
+            subtotal: parseFloat(itemData.subtotal || '0'),
+            gst_amount: parseFloat(itemData.gst_amount || '0'),
+            total_price: parseFloat(itemData.total_price || '0')
+          }
+        });
+      }
+    }
+
+    // Create general order notification for orders module
+    await createNotification({
+      type: 'success',
+      title: `New Order Created: ${finalOrder.order_number}`,
+      message: `Order for ${finalOrder.customer_name} - ${orderData.items?.length || 0} items - Total: ₹${parseFloat(finalOrder.total_amount || 0).toLocaleString()}`,
+      user_id: req.user?.id || req.user?.email,
+      related_id: finalOrder.id,
+      module: 'orders',
+      priority: 'medium',
+      details: {
+        order_number: finalOrder.order_number,
+        customer_name: finalOrder.customer_name,
+        customer_email: finalOrder.customer_email,
+        customer_phone: finalOrder.customer_phone,
+        items_count: orderData.items?.length || 0,
+        total_amount: parseFloat(finalOrder.total_amount || 0),
+        paid_amount: parseFloat(finalOrder.paid_amount || 0),
+        outstanding_amount: parseFloat(finalOrder.outstanding_amount || 0),
+        expected_delivery: finalOrder.expected_delivery,
+        order_date: finalOrder.order_date
+      }
+    });
 
     res.status(201).json({
       success: true,
@@ -226,12 +495,46 @@ export const getOrders = async (req, res) => {
       .limit(parseInt(limit))
       .skip(parseInt(offset));
 
-    // Populate order items for each order
+    // Populate order items for each order with product details
     const ordersWithItems = await Promise.all(
       orders.map(async (order) => {
         const orderObj = order.toObject();
         const items = await OrderItem.find({ order_id: order.id });
-        orderObj.order_items = items;
+
+        // Enhance items with product/material details (color, pattern, dimensions, etc.)
+        const enhancedItems = await Promise.all(items.map(async (item) => {
+          const itemObj = item.toObject();
+
+          // Fetch product or raw material details
+          if (item.product_type === 'raw_material' && item.raw_material_id) {
+            const material = await RawMaterial.findOne({ id: item.raw_material_id });
+            if (material) {
+              itemObj.color = material.color;
+              itemObj.length = material.length;
+              itemObj.width = material.width;
+              itemObj.length_unit = material.length_unit;
+              itemObj.width_unit = material.width_unit;
+              itemObj.weight = material.weight;
+              itemObj.weight_unit = material.weight_unit;
+            }
+          } else if (item.product_id) {
+            const product = await Product.findOne({ id: item.product_id });
+            if (product) {
+              itemObj.color = product.color;
+              itemObj.pattern = product.pattern;
+              itemObj.length = product.length;
+              itemObj.width = product.width;
+              itemObj.length_unit = product.length_unit;
+              itemObj.width_unit = product.width_unit;
+              itemObj.weight = product.weight;
+              itemObj.weight_unit = product.weight_unit;
+            }
+          }
+
+          return itemObj;
+        }));
+
+        orderObj.order_items = enhancedItems;
         return orderObj;
       })
     );
@@ -269,6 +572,14 @@ export const getOrderById = async (req, res) => {
 
     // Enhance items with full product/material details
     const enhancedItems = await Promise.all(orderItems.map(async (item) => {
+      console.log('📦 Order Item from DB:', {
+        id: item.id,
+        product_name: item.product_name,
+        product_id: item.product_id,
+        raw_material_id: item.raw_material_id,
+        product_type: item.product_type
+      });
+
       let productDetails = null;
 
       // Fetch product or raw material details
@@ -364,6 +675,38 @@ export const updateOrder = async (req, res) => {
       }
     }
 
+    // Add activity log for status changes
+    if (changes.status) {
+      const statusMessages = {
+        'accepted': `Order accepted`,
+        'dispatched': `Order dispatched - products marked as sold`,
+        'delivered': `Order delivered to customer`,
+        'cancelled': `Order cancelled`
+      };
+
+      await addActivityLog(
+        order,
+        `order_${order.status}`,
+        statusMessages[order.status] || `Status changed from ${oldStatus} to ${order.status}`,
+        req.user,
+        {
+          old_status: oldStatus,
+          new_status: order.status,
+          order_number: order.order_number
+        }
+      );
+
+      // Create notification for status change
+      await createNotification({
+        type: order.status === 'cancelled' ? 'warning' : 'success',
+        title: `Order ${order.order_number} - ${order.status.charAt(0).toUpperCase() + order.status.slice(1)}`,
+        message: statusMessages[order.status] || `Status changed to ${order.status}`,
+        user_id: req.user?.id || req.user?.email,
+        related_id: order.id,
+        priority: order.status === 'cancelled' ? 'high' : 'medium'
+      });
+    }
+
     await order.save();
 
     // Log order update with changes
@@ -446,6 +789,26 @@ export const updateOrderStatus = async (req, res) => {
         await releaseReservedStock(order.id);
         break;
     }
+
+    // Add activity log for status change
+    const statusDescriptions = {
+      'accepted': `Order accepted and ready for product selection`,
+      'dispatched': `Order dispatched - products marked as sold`,
+      'delivered': `Order delivered to customer`,
+      'cancelled': `Order cancelled - reserved stock released`
+    };
+
+    await addActivityLog(
+      order,
+      `order_${status}`,
+      statusDescriptions[status] || `Order status changed from ${oldStatus} to ${status}`,
+      req.user,
+      {
+        old_status: oldStatus,
+        new_status: status,
+        order_number: order.order_number
+      }
+    );
 
     await order.save();
 
@@ -740,7 +1103,7 @@ export const updateOrderItemIndividualProducts = async (req, res) => {
 // Update order payment
 export const updateOrderPayment = async (req, res) => {
   try {
-    const { paid_amount, payment_method, payment_terms } = req.body;
+    const { paid_amount, payment_method, payment_terms, notes } = req.body;
     const order = await Order.findOne({ id: req.params.id });
 
     if (!order) {
@@ -750,8 +1113,47 @@ export const updateOrderPayment = async (req, res) => {
       });
     }
 
+    const previousPaidAmount = parseFloat(order.paid_amount || '0');
+    const newPaidAmount = parseFloat(paid_amount || '0');
+
+    // Track payment change in history
+    if (previousPaidAmount !== newPaidAmount) {
+      const paymentChange = {
+        amount: newPaidAmount - previousPaidAmount,
+        previous_paid_amount: previousPaidAmount,
+        new_paid_amount: newPaidAmount,
+        changed_by: req.user?.full_name || req.user?.email || 'Unknown',
+        changed_by_email: req.user?.email || 'unknown@email.com',
+        changed_at: new Date(),
+        notes: notes || `Payment updated from ${previousPaidAmount} to ${newPaidAmount}`
+      };
+
+      if (!order.payment_history) {
+        order.payment_history = [];
+      }
+      order.payment_history.push(paymentChange);
+
+      console.log('💰 Payment changed by:', paymentChange.changed_by);
+      console.log('💰 Previous amount:', previousPaidAmount);
+      console.log('💰 New amount:', newPaidAmount);
+
+      // Add activity log for payment update
+      await addActivityLog(
+        order,
+        'payment_updated',
+        `Payment updated: ₹${previousPaidAmount.toLocaleString()} → ₹${newPaidAmount.toLocaleString()}`,
+        req.user,
+        {
+          previous_amount: previousPaidAmount,
+          new_amount: newPaidAmount,
+          difference: newPaidAmount - previousPaidAmount,
+          outstanding: parseFloat(order.total_amount) - newPaidAmount
+        }
+      );
+    }
+
     // Update payment information
-    order.paid_amount = (paid_amount || 0).toString();
+    order.paid_amount = newPaidAmount.toString();
     if (payment_method) order.payment_method = payment_method;
     if (payment_terms) order.payment_terms = payment_terms;
 
@@ -823,16 +1225,17 @@ const markIndividualProductsAsSold = async (orderId) => {
           // Update individual products status to 'sold'
           const individualProductIds = item.selected_individual_products.map(ip => ip.individual_product_id);
           console.log(`🎯 Individual product IDs to update:`, individualProductIds);
-          
+
+          // Update products with status 'available' OR 'reserved' to 'sold'
           const updateResult = await IndividualProduct.updateMany(
-            { id: { $in: individualProductIds }, status: 'available' },
-            { 
+            { id: { $in: individualProductIds }, status: { $in: ['available', 'reserved'] } },
+            {
               status: 'sold',
               sold_date: new Date().toISOString().split('T')[0],
               order_id: orderId
             }
           );
-          
+
           console.log(`✅ Updated ${updateResult.modifiedCount} individual products as sold for order ${orderId}`);
         } else {
           // If no individual products selected, deduct from main product stock
@@ -971,6 +1374,117 @@ export const testStockDeduction = async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+};
+
+// Save individual product selection for an order item
+export const saveIndividualProductSelection = async (req, res) => {
+  try {
+    const { orderItemId, individualProductIds } = req.body;
+
+    if (!orderItemId || !individualProductIds) {
+      return res.status(400).json({
+        success: false,
+        error: 'Order item ID and individual product IDs are required'
+      });
+    }
+
+    // Find the order item
+    const orderItem = await OrderItem.findOne({ id: orderItemId });
+    if (!orderItem) {
+      return res.status(404).json({
+        success: false,
+        error: 'Order item not found'
+      });
+    }
+
+    // Get previously selected products (to unreserve them)
+    const previouslySelected = orderItem.selected_individual_products || [];
+    const previouslySelectedIds = previouslySelected.map(p => p.individual_product_id || p);
+
+    // Unreserve previously selected products that are no longer selected
+    const toUnreserve = previouslySelectedIds.filter(id => !individualProductIds.includes(id));
+    if (toUnreserve.length > 0) {
+      await IndividualProduct.updateMany(
+        { id: { $in: toUnreserve } },
+        { $set: { status: 'available', order_id: null } }
+      );
+      console.log(`✅ Unreserved ${toUnreserve.length} products:`, toUnreserve);
+    }
+
+    // Reserve newly selected products
+    const toReserve = individualProductIds.filter(id => !previouslySelected.map(p => p.individual_product_id || p).includes(id));
+    if (toReserve.length > 0) {
+      await IndividualProduct.updateMany(
+        { id: { $in: toReserve } },
+        { $set: { status: 'reserved', order_id: orderItem.order_id } }
+      );
+      console.log(`✅ Reserved ${toReserve.length} products:`, toReserve);
+    }
+
+    // Fetch the full individual product details
+    const individualProducts = await IndividualProduct.find({ id: { $in: individualProductIds } });
+
+    // Update order item with selected products in the correct format
+    orderItem.selected_individual_products = individualProducts.map(ip => ({
+      individual_product_id: ip.id,
+      qr_code: ip.qr_code,
+      serial_number: ip.serial_number
+    }));
+    await orderItem.save();
+
+    // Add activity log to order
+    const order = await Order.findOne({ id: orderItem.order_id });
+    if (order) {
+      const action = previouslySelected.length > 0 ? 'individual_products_changed' : 'individual_products_selected';
+      const description = previouslySelected.length > 0
+        ? `Individual products updated for ${orderItem.product_name}: ${previouslySelected.length} → ${individualProductIds.length} products`
+        : `${individualProductIds.length} individual products selected for ${orderItem.product_name}`;
+
+      // Fetch individual product details for logging
+      const selectedIndividualProducts = await IndividualProduct.find({ id: { $in: individualProductIds } });
+      const productDetails = selectedIndividualProducts.map(ip => ({
+        id: ip.id,
+        qr_code: ip.qr_code,
+        serial_number: ip.serial_number
+      }));
+
+      await addActivityLog(
+        order,
+        action,
+        description,
+        req.user,
+        {
+          product_name: orderItem.product_name,
+          product_id: orderItem.product_id,
+          selected_count: individualProductIds.length,
+          required_count: orderItem.quantity,
+          previously_selected_count: previouslySelected.length,
+          reserved_count: toReserve.length,
+          unreserved_count: toUnreserve.length,
+          individual_products: productDetails,
+          individual_product_ids: individualProductIds
+        }
+      );
+
+      await order.save();
+    }
+
+    res.json({
+      success: true,
+      message: 'Individual product selection saved successfully',
+      data: {
+        orderItemId,
+        selectedCount: individualProductIds.length,
+        requiredCount: orderItem.quantity
+      }
+    });
+  } catch (error) {
+    console.error('Error saving individual product selection:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to save individual product selection'
     });
   }
 };

@@ -221,7 +221,19 @@ export const logIndividualProductGenerate = async (req, product, quantity) => {
 
 // Production-specific loggers
 export const logProductionStart = async (req, production) => {
-  const description = `Started production batch ${production.batch_number} for order ${production.order_id}`;
+  // Get product and recipe details
+  const Product = (await import('../models/Product.js')).default;
+  const product = production.product_id ? await Product.findOne({ id: production.product_id }) : null;
+
+  const productInfo = product ? [
+    `Product: ${product.name}`,
+    product.category ? `Category: ${product.category}` : null,
+    product.color ? `Color: ${product.color}` : null,
+    product.pattern ? `Pattern: ${product.pattern}` : null,
+    product.length && product.width ? `Size: ${product.length}${product.length_unit} × ${product.width}${product.width_unit}` : null
+  ].filter(Boolean).join(', ') : '';
+
+  const description = `Created production batch ${production.batch_number} | ${productInfo} | Planned Qty: ${production.planned_quantity} | Priority: ${production.priority} | Operator: ${production.operator || 'Not assigned'}`;
 
   return logActivity(req, {
     action: 'PRODUCTION_CREATE',
@@ -231,78 +243,336 @@ export const logProductionStart = async (req, production) => {
     resourceType: 'Production',
     metadata: {
       batch_number: production.batch_number,
+      batch_id: production.id,
+      product_id: production.product_id,
+      product_name: product?.name || null,
+      product_category: product?.category || null,
+      product_color: product?.color || null,
+      product_pattern: product?.pattern || null,
+      product_dimensions: product && product.length && product.width ? {
+        length: product.length,
+        length_unit: product.length_unit,
+        width: product.width,
+        width_unit: product.width_unit
+      } : null,
+      planned_quantity: production.planned_quantity,
+      priority: production.priority,
+      status: production.status,
+      operator: production.operator,
+      supervisor: production.supervisor,
+      start_date: production.start_date,
       order_id: production.order_id,
-      status: production.status
+      notes: production.notes
     }
   });
 };
 
 export const logProductionRecipeAdd = async (req, production, recipe) => {
-  const description = `Added recipe to production batch ${production.batch_number} with ${recipe.materials?.length || 0} materials`;
+  const materials = recipe.materials || [];
+  const materialDetails = materials.map(m =>
+    `${m.material_name} (${m.quantity_required} ${m.unit})`
+  ).join(', ');
+
+  const description = `Added recipe to production batch ${production.batch_number} with ${materials.length} materials: ${materialDetails}`;
 
   return logActivity(req, {
-    action: 'PRODUCTION_UPDATE',
+    action: 'PRODUCTION_RECIPE_ADD',
     category: 'PRODUCTION',
     description,
     resourceId: production.batch_number,
     resourceType: 'Production',
     metadata: {
       batch_number: production.batch_number,
-      material_count: recipe.materials?.length || 0,
+      batch_id: production.id,
+      material_count: materials.length,
+      materials: materials.map(m => ({
+        material_id: m.material_id,
+        material_name: m.material_name,
+        material_type: m.material_type,
+        quantity_required: m.quantity_required,
+        unit: m.unit,
+        quantity_per_sqm: m.quantity_per_sqm
+      })),
       step: 'recipe_added'
     }
   });
 };
 
-export const logProductionMachineAssign = async (req, production, machineId) => {
-  const description = `Assigned machine to production batch ${production.batch_number} (Machine ID: ${machineId})`;
+// Log recipe edit/update in production
+export const logProductionRecipeUpdate = async (req, production, oldRecipe, newRecipe) => {
+  const oldMaterials = oldRecipe.materials || [];
+  const newMaterials = newRecipe.materials || [];
+
+  const added = newMaterials.filter(nm => !oldMaterials.find(om => om.material_id === nm.material_id));
+  const removed = oldMaterials.filter(om => !newMaterials.find(nm => nm.material_id === om.material_id));
+  const changed = newMaterials.filter(nm => {
+    const old = oldMaterials.find(om => om.material_id === nm.material_id);
+    return old && old.quantity_required !== nm.quantity_required;
+  });
+
+  const changes = [];
+  if (added.length) changes.push(`Added: ${added.map(m => m.material_name).join(', ')}`);
+  if (removed.length) changes.push(`Removed: ${removed.map(m => m.material_name).join(', ')}`);
+  if (changed.length) changes.push(`Changed quantities: ${changed.map(m => m.material_name).join(', ')}`);
+
+  const description = `Updated recipe for batch ${production.batch_number} | ${changes.join(' | ')}`;
 
   return logActivity(req, {
-    action: 'PRODUCTION_UPDATE',
+    action: 'PRODUCTION_RECIPE_UPDATE',
+    category: 'PRODUCTION',
+    description,
+    resourceId: production.batch_number,
+    resourceType: 'Production',
+    changes: {
+      old_material_count: oldMaterials.length,
+      new_material_count: newMaterials.length,
+      materials_added: added.map(m => m.material_name),
+      materials_removed: removed.map(m => m.material_name),
+      materials_changed: changed.map(m => m.material_name)
+    },
+    metadata: {
+      batch_number: production.batch_number,
+      batch_id: production.id,
+      old_materials: oldMaterials.map(m => ({
+        material_id: m.material_id,
+        material_name: m.material_name,
+        quantity_required: m.quantity_required,
+        unit: m.unit
+      })),
+      new_materials: newMaterials.map(m => ({
+        material_id: m.material_id,
+        material_name: m.material_name,
+        quantity_required: m.quantity_required,
+        unit: m.unit
+      })),
+      added_materials: added,
+      removed_materials: removed,
+      changed_materials: changed.map(m => {
+        const old = oldMaterials.find(om => om.material_id === m.material_id);
+        return {
+          material_name: m.material_name,
+          old_quantity: old.quantity_required,
+          new_quantity: m.quantity_required,
+          unit: m.unit
+        };
+      })
+    }
+  });
+};
+
+// Log individual product selection in production
+export const logProductionIndividualProductSelection = async (req, production, selectedProducts) => {
+  const productDetails = selectedProducts.map((p, idx) =>
+    `${idx + 1}. ${p.qr_code || p.id} (SN: ${p.serial_number || 'N/A'})`
+  ).join(', ');
+
+  const description = `Selected ${selectedProducts.length} individual products for batch ${production.batch_number}: ${productDetails}`;
+
+  return logActivity(req, {
+    action: 'PRODUCTION_PRODUCTS_SELECTED',
     category: 'PRODUCTION',
     description,
     resourceId: production.batch_number,
     resourceType: 'Production',
     metadata: {
       batch_number: production.batch_number,
-      machine_id: machineId,
+      batch_id: production.id,
+      product_count: selectedProducts.length,
+      individual_products: selectedProducts.map(p => ({
+        id: p.id,
+        individual_product_id: p.individual_product_id || p.id,
+        qr_code: p.qr_code,
+        serial_number: p.serial_number,
+        batch_number: p.batch_number,
+        status: p.status,
+        quality_grade: p.quality_grade
+      }))
+    }
+  });
+};
+
+// Log raw material selection in production
+export const logProductionRawMaterialSelection = async (req, production, selectedMaterials) => {
+  const materialDetails = selectedMaterials.map(m =>
+    `${m.material_name}: ${m.quantity_used} ${m.unit} (Batch: ${m.batch_number || 'N/A'})`
+  ).join(', ');
+
+  const description = `Selected ${selectedMaterials.length} raw materials for batch ${production.batch_number}: ${materialDetails}`;
+
+  return logActivity(req, {
+    action: 'PRODUCTION_MATERIALS_SELECTED',
+    category: 'PRODUCTION',
+    description,
+    resourceId: production.batch_number,
+    resourceType: 'Production',
+    metadata: {
+      batch_number: production.batch_number,
+      batch_id: production.id,
+      material_count: selectedMaterials.length,
+      raw_materials: selectedMaterials.map(m => ({
+        material_id: m.material_id,
+        material_name: m.material_name,
+        material_type: m.material_type,
+        quantity_used: m.quantity_used,
+        unit: m.unit,
+        batch_number: m.batch_number,
+        supplier: m.supplier,
+        individual_material_ids: m.individual_material_ids || []
+      }))
+    }
+  });
+};
+
+export const logProductionMachineAssign = async (req, production, machine, stepName) => {
+  const ProductionMachine = (await import('../models/ProductionMachine.js')).default;
+  const machineDetails = machine.id ? await ProductionMachine.findOne({ id: machine.id }) : machine;
+
+  const machineInfo = machineDetails ? [
+    `Machine: ${machineDetails.name}`,
+    machineDetails.machine_type ? `Type: ${machineDetails.machine_type}` : null,
+    machineDetails.capacity ? `Capacity: ${machineDetails.capacity}` : null,
+    machineDetails.operator ? `Operator: ${machineDetails.operator}` : null
+  ].filter(Boolean).join(', ') : `Machine ID: ${machine.id || machine}`;
+
+  const description = `Assigned machine to ${stepName || 'production step'} for batch ${production.batch_number} | ${machineInfo}`;
+
+  return logActivity(req, {
+    action: 'PRODUCTION_MACHINE_ASSIGNED',
+    category: 'PRODUCTION',
+    description,
+    resourceId: production.batch_number,
+    resourceType: 'Production',
+    metadata: {
+      batch_number: production.batch_number,
+      batch_id: production.id,
+      machine_id: machineDetails?.id || machine.id || machine,
+      machine_name: machineDetails?.name || null,
+      machine_type: machineDetails?.machine_type || null,
+      machine_capacity: machineDetails?.capacity || null,
+      machine_operator: machineDetails?.operator || null,
+      machine_specifications: machineDetails?.specifications || null,
+      step_name: stepName,
       step: 'machine_assigned'
     }
   });
 };
 
-export const logProductionStepComplete = async (req, production, stepName) => {
-  const description = `Completed ${stepName} step for production batch ${production.batch_number}`;
+export const logProductionStepComplete = async (req, production, stepName, stepDetails = {}) => {
+  const details = [
+    stepDetails.machine ? `Machine: ${stepDetails.machine}` : null,
+    stepDetails.duration ? `Duration: ${stepDetails.duration}` : null,
+    stepDetails.quality_check ? `Quality: ${stepDetails.quality_check}` : null,
+    stepDetails.operator ? `Operator: ${stepDetails.operator}` : null
+  ].filter(Boolean).join(', ');
+
+  const description = `Completed ${stepName} step for batch ${production.batch_number}${details ? ` | ${details}` : ''}`;
 
   return logActivity(req, {
-    action: 'PRODUCTION_UPDATE',
+    action: 'PRODUCTION_STEP_COMPLETE',
     category: 'PRODUCTION',
     description,
     resourceId: production.batch_number,
     resourceType: 'Production',
     metadata: {
       batch_number: production.batch_number,
+      batch_id: production.id,
       step_completed: stepName,
-      current_status: production.status
+      current_status: production.status,
+      machine_used: stepDetails.machine || null,
+      duration_minutes: stepDetails.duration || null,
+      quality_check_passed: stepDetails.quality_check || null,
+      operator: stepDetails.operator || null,
+      notes: stepDetails.notes || null,
+      completed_at: new Date()
     }
   });
 };
 
 export const logProductionWastageAdd = async (req, production, wastageData) => {
-  const description = `Added wastage entry for production batch ${production.batch_number}: ${wastageData.waste_type} (${wastageData.quantity} ${wastageData.unit})`;
+  const details = [
+    `Type: ${wastageData.waste_type}`,
+    `Quantity: ${wastageData.quantity} ${wastageData.unit}`,
+    wastageData.reason ? `Reason: ${wastageData.reason}` : null,
+    wastageData.stage ? `Stage: ${wastageData.stage}` : null,
+    wastageData.material_name ? `Material: ${wastageData.material_name}` : null
+  ].filter(Boolean).join(' | ');
+
+  const description = `Added wastage for batch ${production.batch_number}: ${details}`;
 
   return logActivity(req, {
-    action: 'PRODUCTION_UPDATE',
+    action: 'PRODUCTION_WASTAGE_ADD',
     category: 'PRODUCTION',
     description,
     resourceId: production.batch_number,
     resourceType: 'Production',
     metadata: {
       batch_number: production.batch_number,
+      batch_id: production.id,
       waste_type: wastageData.waste_type,
       quantity: wastageData.quantity,
       unit: wastageData.unit,
-      step: 'wastage_added'
+      reason: wastageData.reason || null,
+      stage: wastageData.stage || null,
+      material_id: wastageData.material_id || null,
+      material_name: wastageData.material_name || null,
+      cost_impact: wastageData.cost_impact || null,
+      notes: wastageData.notes || null,
+      approved_by: wastageData.approved_by || null,
+      step: 'wastage_added',
+      recorded_at: new Date()
+    }
+  });
+};
+
+// Log individual product detail update (dimensions, weight, quality, etc.)
+export const logIndividualProductDetailUpdate = async (req, individualProduct, field, oldValue, newValue) => {
+  const description = `Updated ${field} for individual product ${individualProduct.qr_code || individualProduct.id}: ${oldValue || 'N/A'} → ${newValue}`;
+
+  return logActivity(req, {
+    action: 'ITEM_UPDATE',
+    category: 'ITEM',
+    description,
+    resourceId: individualProduct.id,
+    resourceType: 'IndividualProduct',
+    changes: {
+      field: field,
+      old_value: oldValue,
+      new_value: newValue
+    },
+    metadata: {
+      individual_product_id: individualProduct.id,
+      qr_code: individualProduct.qr_code,
+      serial_number: individualProduct.serial_number,
+      product_id: individualProduct.product_id,
+      batch_number: individualProduct.batch_number,
+      field_updated: field,
+      old_value: oldValue,
+      new_value: newValue,
+      updated_at: new Date()
+    }
+  });
+};
+
+// Log batch individual product detail fill
+export const logIndividualProductDetailsFill = async (req, individualProduct, fields) => {
+  const filledFields = Object.keys(fields).map(key => `${key}: ${fields[key]}`).join(', ');
+  const description = `Filled details for individual product ${individualProduct.qr_code || individualProduct.id}: ${filledFields}`;
+
+  return logActivity(req, {
+    action: 'ITEM_DETAILS_FILL',
+    category: 'ITEM',
+    description,
+    resourceId: individualProduct.id,
+    resourceType: 'IndividualProduct',
+    metadata: {
+      individual_product_id: individualProduct.id,
+      qr_code: individualProduct.qr_code,
+      serial_number: individualProduct.serial_number,
+      product_id: individualProduct.product_id,
+      batch_number: individualProduct.batch_number,
+      fields_filled: Object.keys(fields),
+      field_values: fields,
+      filled_at: new Date()
     }
   });
 };

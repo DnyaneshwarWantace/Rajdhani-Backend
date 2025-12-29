@@ -1,7 +1,7 @@
 import IndividualProduct from '../models/IndividualProduct.js';
 import Product from '../models/Product.js';
 import { generateIndividualProductId, generateQRCode } from '../utils/idGenerator.js';
-import { logIndividualProductGenerate } from '../utils/detailedLogger.js';
+import { logIndividualProductGenerate, logIndividualProductDetailUpdate, logIndividualProductDetailsFill } from '../utils/detailedLogger.js';
 import { escapeRegex } from '../utils/regexHelper.js';
 
 // Create individual products in bulk
@@ -389,6 +389,24 @@ export const updateIndividualProduct = async (req, res) => {
       });
     }
 
+    // Track which fields are being updated for detailed logging
+    const fieldsBeingUpdated = {};
+    const detailFields = ['length', 'width', 'height', 'weight', 'quality_grade', 'inspector', 'notes', 'location', 'serial_number'];
+
+    detailFields.forEach(field => {
+      if (updateData[field] !== undefined && individualProduct[field] !== updateData[field]) {
+        fieldsBeingUpdated[field] = {
+          old: individualProduct[field],
+          new: updateData[field]
+        };
+      }
+    });
+
+    // Check if this is an initial detail fill (previously empty) or an update
+    const isInitialFill = Object.keys(fieldsBeingUpdated).some(field =>
+      !individualProduct[field] && updateData[field]
+    );
+
     // If status is being changed to 'sold', add sale information
     if (updateData.status === 'sold') {
       updateData.sold_date = new Date();
@@ -401,6 +419,29 @@ export const updateIndividualProduct = async (req, res) => {
 
     Object.assign(individualProduct, updateData);
     await individualProduct.save();
+
+    // Log detail updates or initial fills
+    if (Object.keys(fieldsBeingUpdated).length > 0) {
+      if (isInitialFill && Object.keys(fieldsBeingUpdated).every(f => !fieldsBeingUpdated[f].old)) {
+        // All fields are new - this is an initial fill
+        const filledFields = {};
+        Object.keys(fieldsBeingUpdated).forEach(field => {
+          filledFields[field] = fieldsBeingUpdated[field].new;
+        });
+        await logIndividualProductDetailsFill(req, individualProduct, filledFields);
+      } else {
+        // Log each field change separately for clarity
+        for (const field of Object.keys(fieldsBeingUpdated)) {
+          await logIndividualProductDetailUpdate(
+            req,
+            individualProduct,
+            field,
+            fieldsBeingUpdated[field].old,
+            fieldsBeingUpdated[field].new
+          );
+        }
+      }
+    }
 
     // Sync current_stock if status changed
     if (updateData.status) {

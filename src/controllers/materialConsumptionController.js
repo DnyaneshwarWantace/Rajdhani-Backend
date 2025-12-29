@@ -6,6 +6,7 @@ import RawMaterial from '../models/RawMaterial.js';
 import IndividualProduct from '../models/IndividualProduct.js';
 import IndividualRawMaterial from '../models/IndividualRawMaterial.js';
 import { ProductionBatch } from '../models/Production.js';
+import { logProductionIndividualProductSelection, logProductionRawMaterialSelection } from '../utils/detailedLogger.js';
 
 // Get all material consumption records
 const getAllMaterialConsumption = async (req, res) => {
@@ -593,6 +594,26 @@ const createMaterialConsumption = async (req, res) => {
       individual_product_ids_count: finalConsumption.individual_product_ids?.length || 0,
       individual_product_ids: finalConsumption.individual_product_ids || [],
     });
+
+    // Log material selection for production
+    const batch = await ProductionBatch.findOne({ id: production_batch_id });
+    if (batch) {
+      if (material_type === 'product' && individual_product_ids && individual_product_ids.length > 0) {
+        // Log individual product selection
+        await logProductionIndividualProductSelection(req, batch, individualProducts);
+      } else if (material_type === 'raw_material') {
+        // Log raw material selection
+        const rawMaterialData = {
+          material_id,
+          material_name,
+          quantity_used: qtyUsed,
+          unit,
+          batch_number: batch?.batch_number || 'N/A',
+          operator: operator || req.user?.full_name || 'Unknown'
+        };
+        await logProductionRawMaterialSelection(req, batch, [rawMaterialData]);
+      }
+    }
 
     res.status(201).json({
       success: true,

@@ -81,7 +81,7 @@ const orderItemSchema = new mongoose.Schema({
   // Additional pricing fields for SQM-based calculations
   pricing_unit: {
     type: String,
-    enum: ['piece', 'sqm', 'meter', 'kg', 'roll', 'set', 'gsm', null],
+    enum: ['piece', 'sqm', 'sqft', 'meter', 'kg', 'roll', 'set', 'gsm', 'unit', null],
     default: null
   },
   unit_value: {
@@ -208,45 +208,29 @@ orderItemSchema.virtual('is_fully_selected').get(function() {
 orderItemSchema.set('toJSON', { virtuals: true });
 orderItemSchema.set('toObject', { virtuals: true });
 
-// Pre-save middleware - Calculate subtotal, GST, and total
+// Pre-save middleware - Just update timestamp, don't recalculate prices
+// Frontend already calculates total_price based on pricing_unit (SQM, SQFT, GSM, etc.)
 orderItemSchema.pre('save', function(next) {
-  console.log('PRE-SAVE HOOK - Before:', {
+  console.log('PRE-SAVE HOOK - Order Item:', {
     product: this.product_name,
     quantity: this.quantity,
     unit_price: this.unit_price,
-    subtotal_before: this.subtotal,
-    gst_rate: this.gst_rate,
-    gst_amount_before: this.gst_amount,
-    total_price_before: this.total_price,
     pricing_unit: this.pricing_unit,
-    unit_value: this.unit_value
+    unit_value: this.unit_value,
+    total_price: this.total_price,
+    gst_rate: this.gst_rate,
+    gst_included: this.gst_included
   });
 
-  // Calculate subtotal (quantity * unit_price)
-  const quantity = parseFloat(this.quantity) || 0;
-  const unitPrice = parseFloat(this.unit_price) || 0;
-  const subtotal = quantity * unitPrice;
-  this.subtotal = subtotal.toFixed(2);
-
-  // Calculate GST amount based on GST rate
-  const gstRate = parseFloat(this.gst_rate) || 0;
-  let gstAmount = 0;
-
-  if (this.gst_included && gstRate > 0) {
-    gstAmount = (subtotal * gstRate) / 100;
+  // Don't recalculate - frontend already calculated based on pricing_unit
+  // Just ensure fields have default values if not set
+  if (!this.subtotal || this.subtotal === '0.00') {
+    this.subtotal = this.total_price || '0.00';
   }
 
-  this.gst_amount = gstAmount.toFixed(2);
-
-  // Calculate total price (subtotal + GST)
-  const totalPrice = subtotal + gstAmount;
-  this.total_price = totalPrice.toFixed(2);
-
-  console.log('CALCULATED VALUES:', {
-    subtotal: this.subtotal,
-    gst_amount: this.gst_amount,
-    total_price: this.total_price
-  });
+  if (!this.gst_amount || this.gst_amount === '0.00') {
+    this.gst_amount = '0.00';
+  }
 
   this.updated_at = new Date();
   next();

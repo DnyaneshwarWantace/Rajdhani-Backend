@@ -13,7 +13,8 @@ import {
   updateOrderItemIndividualProducts,
   updateOrderPayment,
   updateOrderGST,
-  testStockDeduction
+  testStockDeduction,
+  saveIndividualProductSelection
 } from '../controllers/orderController.js';
 import { authenticate, checkPermission, checkPageAccess } from '../middleware/authMiddleware.js';
 
@@ -41,6 +42,9 @@ router.post('/:order_id/items', checkPermission('order_edit'), addOrderItem);
 router.put('/items/:item_id', checkPermission('order_edit'), updateOrderItem);
 router.patch('/items/:item_id/individual-products', checkPermission('order_edit'), updateOrderItemIndividualProducts);
 router.delete('/items/:item_id', checkPermission('order_edit'), removeOrderItem);
+
+// Individual product selection for order items
+router.post('/items/save-individual-products', checkPermission('order_edit'), saveIndividualProductSelection);
 
 // Test route for stock deduction (requires order_edit permission)
 router.post('/:orderId/test-stock-deduction', checkPermission('order_edit'), testStockDeduction);

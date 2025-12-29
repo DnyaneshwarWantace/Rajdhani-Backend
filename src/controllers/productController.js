@@ -2,7 +2,7 @@ import Product from '../models/Product.js';
 import IndividualProduct from '../models/IndividualProduct.js';
 import DropdownOption from '../models/DropdownOption.js';
 import { generateProductId, generateQRCode } from '../utils/idGenerator.js';
-import { logProductCreate, logProductUpdate, logProductDelete } from '../utils/detailedLogger.js';
+import { logProductCreate, logProductUpdate, logProductDelete, logProductionRecipeUpdate } from '../utils/detailedLogger.js';
 import { escapeRegex } from '../utils/regexHelper.js';
 
 // Create a new product
@@ -571,12 +571,21 @@ export const updateProduct = async (req, res) => {
       }
     }
 
+    // Store old recipe before updating
+    const oldRecipe = product.recipe ? JSON.parse(JSON.stringify(product.recipe)) : { materials: [] };
+
     Object.assign(product, updateData);
     await product.save();
 
     // Log product update with changes
     if (Object.keys(changes).length > 0) {
       await logProductUpdate(req, product, changes);
+
+      // If recipe was updated, log detailed recipe changes
+      if (changes.recipe) {
+        const newRecipe = product.recipe ? { materials: product.recipe } : { materials: [] };
+        await logProductionRecipeUpdate(req, product, oldRecipe, newRecipe);
+      }
     }
 
     res.json({

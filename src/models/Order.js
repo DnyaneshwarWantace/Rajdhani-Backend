@@ -147,7 +147,79 @@ const orderSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
-  
+
+  // Payment history tracking
+  payment_history: [{
+    amount: {
+      type: Number,
+      required: true
+    },
+    previous_paid_amount: {
+      type: Number,
+      required: true
+    },
+    new_paid_amount: {
+      type: Number,
+      required: true
+    },
+    changed_by: {
+      type: String,
+      required: true
+    },
+    changed_by_email: {
+      type: String,
+      required: true
+    },
+    changed_at: {
+      type: Date,
+      default: Date.now
+    },
+    notes: {
+      type: String
+    }
+  }],
+
+  // Activity logs - detailed tracking of all actions
+  activity_logs: [{
+    action: {
+      type: String,
+      required: true,
+      enum: [
+        'order_created',
+        'order_accepted',
+        'order_dispatched',
+        'order_delivered',
+        'order_cancelled',
+        'payment_updated',
+        'individual_products_selected',
+        'individual_products_changed',
+        'quantity_updated',
+        'item_added',
+        'item_removed',
+        'order_edited'
+      ]
+    },
+    description: {
+      type: String,
+      required: true
+    },
+    performed_by: {
+      type: String,
+      required: true
+    },
+    performed_by_email: {
+      type: String,
+      required: true
+    },
+    timestamp: {
+      type: Date,
+      default: Date.now
+    },
+    details: {
+      type: mongoose.Schema.Types.Mixed
+    }
+  }],
+
   // Timestamps
   created_at: {
     type: Date,
