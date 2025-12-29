@@ -753,6 +753,28 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
+    // Validation: Cannot dispatch if order has product items without individual products selected
+    if (status === 'dispatched') {
+      const orderItems = await OrderItem.find({ order_id: order.id });
+
+      const productItems = orderItems.filter(item => item.product_type === 'product');
+
+      if (productItems.length > 0) {
+        // Check if all product items have individual products selected
+        const itemsWithoutIndividualProducts = productItems.filter(item =>
+          !item.selected_individual_products || item.selected_individual_products.length === 0
+        );
+
+        if (itemsWithoutIndividualProducts.length > 0) {
+          return res.status(400).json({
+            success: false,
+            error: 'Cannot dispatch order. Please select individual products for all product items before dispatching.',
+            items_without_selection: itemsWithoutIndividualProducts.map(item => item.product_name)
+          });
+        }
+      }
+    }
+
     // Store old status for logging
     const oldStatus = order.status;
 
