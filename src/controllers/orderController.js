@@ -194,10 +194,12 @@ export const createOrder = async (req, res) => {
         // They will be reserved when order status changes to 'accepted' (similar to individual products)
       }
 
-      // Calculate order totals from items (items already have GST included in total_price from frontend)
+      // Calculate order totals from items (items already have GST calculated by frontend)
       const items = await OrderItem.find({ order_id: order.id });
 
-      // Sum up all item total prices (already includes GST calculated by frontend based on pricing unit)
+      // Sum up subtotals and GST amounts from all items
+      const subtotalSum = items.reduce((sum, item) => sum + parseFloat(item.subtotal || 0), 0);
+      const gstSum = items.reduce((sum, item) => sum + parseFloat(item.gst_amount || 0), 0);
       const totalAmount = items.reduce((sum, item) => sum + parseFloat(item.total_price || 0), 0);
 
       const discountAmount = parseFloat(order.discount_amount) || 0;
@@ -213,8 +215,8 @@ export const createOrder = async (req, res) => {
       await Order.findOneAndUpdate(
         { id: order.id },
         {
-          subtotal: totalAmount.toFixed(2),
-          gst_amount: '0.00', // GST already included in item total_price
+          subtotal: subtotalSum.toFixed(2),
+          gst_amount: gstSum.toFixed(2),
           total_amount: finalTotal.toFixed(2),
           outstanding_amount: outstandingAmount.toFixed(2)
         }
